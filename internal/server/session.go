@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/pairpad/pairpad/internal/protocol"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // Colors assigned to participants in join order (Catppuccin Mocha palette).

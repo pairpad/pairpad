@@ -14,7 +14,7 @@ import (
 	"syscall"
 
 	"github.com/pairpad/pairpad/internal/protocol"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 //go:embed static
@@ -82,6 +82,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.CloseNow()
+	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
 	sessionID := generateID()
 	sess := newSession(sessionID, conn)
@@ -179,6 +180,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.CloseNow()
+	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
 	p := sess.addBrowser(conn)
 	defer func() {

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/pairpad/pairpad/internal/protocol"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // Config holds the daemon configuration.
@@ -59,6 +59,7 @@ func (d *Daemon) Run() error {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
 	defer conn.CloseNow()
+	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
 	// Send initial file tree
 	if err := d.sendFileTree(ctx, conn); err != nil {

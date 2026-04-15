@@ -16,6 +16,10 @@ var hardDenyPatterns = []string{
 	".pairpad",
 	"*.pem",
 	"*.key",
+	"*.tmp",
+	"*.swp",
+	"*.swo",
+	"*~",
 	"node_modules",
 }
 
