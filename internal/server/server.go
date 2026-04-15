@@ -132,9 +132,18 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			// Relay to browsers
 			sess.broadcastToBrowsers(r.Context(), data)
 
-		case protocol.TypeFileContent, protocol.TypeFileChanged,
-			protocol.TypeFileCreated, protocol.TypeFileDeleted:
-			// Relay directly to browsers
+		case protocol.TypeFileContent:
+			// Route to the browser that requested it, not everyone
+			var msg protocol.FileContent
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			if requester := sess.resolveFileRequest(msg.Path); requester != nil {
+				requester.Write(r.Context(), websocket.MessageText, data)
+			}
+
+		case protocol.TypeFileChanged, protocol.TypeFileCreated, protocol.TypeFileDeleted:
+			// Broadcast daemon-initiated changes to all browsers
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypePong:
@@ -170,16 +179,47 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 
-	sess.addBrowser(conn)
+	p := sess.addBrowser(conn)
 	defer func() {
 		sess.removeBrowser(conn)
-		s.broadcastParticipantCount(r.Context(), sess)
+		s.broadcastParticipants(r.Context(), sess)
+		log.Printf("browser left session %s", sessionID)
 	}()
 
-	log.Printf("browser joined session %s", sessionID)
-	s.broadcastParticipantCount(r.Context(), sess)
+	log.Printf("browser connected to session %s, waiting for identify", sessionID)
 
-	// Send current file tree to the newly connected browser
+	// Wait for the identify message before doing anything else
+	for {
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			return
+		}
+		env, err := protocol.Decode(data)
+		if err != nil {
+			continue
+		}
+		if env.Type == protocol.TypeIdentify {
+			var msg protocol.Identify
+			if err := protocol.DecodePayload(env, &msg); err == nil && msg.Name != "" {
+				sess.identifyBrowser(conn, msg.Name)
+				log.Printf("%s joined session %s (color %s)", msg.Name, sessionID, p.color)
+				break
+			}
+		}
+	}
+
+	// Send participant's assigned color back
+	colorData, err := protocol.Encode("your_color", struct {
+		Color string `json:"color"`
+	}{Color: p.color})
+	if err == nil {
+		conn.Write(r.Context(), websocket.MessageText, colorData)
+	}
+
+	// Broadcast updated participant list
+	s.broadcastParticipants(r.Context(), sess)
+
+	// Send current file tree
 	if tree := sess.getFileTree(); tree != nil {
 		data, err := protocol.Encode(protocol.TypeFileTree, protocol.FileTree{Files: tree})
 		if err == nil {
@@ -202,18 +242,17 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 
 		switch env.Type {
 		case protocol.TypeOpenFile:
-			// Browser wants to open a file — ask daemon for it
 			var msg protocol.OpenFile
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
+			sess.trackFileRequest(msg.Path, conn)
 			reqData, err := protocol.Encode(protocol.TypeRequestFile, protocol.RequestFile{Path: msg.Path})
 			if err == nil {
 				sess.daemon.Write(r.Context(), websocket.MessageText, reqData)
 			}
 
 		case protocol.TypeSaveFile:
-			// Browser wants to save — tell daemon to write
 			var msg protocol.SaveFile
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
@@ -244,19 +283,18 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, ",")
 		}
 		sess.mu.RLock()
-		fmt.Fprintf(w, `{"id":%q,"browsers":%d,"files":%d}`, id, len(sess.browsers), len(sess.fileTree))
+		fmt.Fprintf(w, `{"id":%q,"participants":%d,"files":%d}`, id, len(sess.participants), len(sess.fileTree))
 		sess.mu.RUnlock()
 		i++
 	}
 	fmt.Fprint(w, "]}")
 }
 
-func (s *Server) broadcastParticipantCount(ctx context.Context, sess *session) {
-	sess.mu.RLock()
-	count := len(sess.browsers)
-	sess.mu.RUnlock()
-
-	data, err := protocol.Encode(protocol.TypeParticipantInfo, protocol.ParticipantInfo{Count: count})
+func (s *Server) broadcastParticipants(ctx context.Context, sess *session) {
+	list := sess.getParticipantList()
+	data, err := protocol.Encode(protocol.TypeParticipantList, protocol.ParticipantList{
+		Participants: list,
+	})
 	if err == nil {
 		sess.broadcastToBrowsers(ctx, data)
 	}

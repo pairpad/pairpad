@@ -109,11 +109,29 @@
       align-items: center;
       gap: 4px;
     }
-    .dot {
-      width: 6px; height: 6px;
+    #topbar .participants {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .participant-badge {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+    }
+    .participant-dot {
+      width: 8px; height: 8px;
       border-radius: 50%;
-      background: #a6e3a1;
       display: inline-block;
+      flex-shrink: 0;
+    }
+    .participant-name {
+      color: #a6adc8;
+    }
+    .participant-name.you {
+      font-weight: 600;
+      color: #cdd6f4;
     }
 
     /* Main area: sidebar + editor */
@@ -211,21 +229,6 @@
       flex: 1;
       overflow: hidden;
     }
-    #editor-container textarea {
-      width: 100%;
-      height: 100%;
-      background: #1e1e2e;
-      color: #cdd6f4;
-      border: none;
-      padding: 16px;
-      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-      font-size: 14px;
-      line-height: 1.5;
-      resize: none;
-      outline: none;
-      tab-size: 4;
-    }
-
     /* Status bar */
     #status {
       height: 22px;
@@ -246,10 +249,24 @@
     <div id="connect-box">
       <h1>Pairpad</h1>
       <p class="tagline">Collaborative code editing on your local files</p>
-      <div class="input-row">
-        <input type="text" id="session-input" placeholder="Paste a session link or ID" autofocus>
-        <button onclick="joinSession()">Join</button>
+
+      <!-- Step 1: Session ID -->
+      <div id="step-session">
+        <div class="input-row">
+          <input type="text" id="session-input" placeholder="Paste a session link or ID" autofocus>
+          <button onclick="submitSession()">Next</button>
+        </div>
       </div>
+
+      <!-- Step 2: Display name -->
+      <div id="step-name" style="display:none">
+        <p class="tagline" style="margin-bottom:16px">What should others call you?</p>
+        <div class="input-row">
+          <input type="text" id="name-input" placeholder="Your name" maxlength="30">
+          <button onclick="joinSession()">Join</button>
+        </div>
+      </div>
+
       <div id="connect-error"></div>
     </div>
   </div>
@@ -260,10 +277,7 @@
         <strong>Pairpad</strong>
         <span class="session-id" id="session-id-display"></span>
       </div>
-      <div class="participants">
-        <span class="dot"></span>
-        <span id="participant-count">1</span> connected
-      </div>
+      <div class="participants" id="participant-list"></div>
     </div>
     <div id="workspace">
       <div id="sidebar">

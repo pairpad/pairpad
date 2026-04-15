@@ -24,12 +24,13 @@ const (
 	TypeCreateFile  MessageType = "create_file"
 
 	// Browser → Server
+	TypeIdentify  MessageType = "identify"
 	TypeOpenFile  MessageType = "open_file"
 	TypeCloseFile MessageType = "close_file"
 	TypeSaveFile  MessageType = "save_file"
 
 	// Server → Browser
-	TypeParticipantInfo MessageType = "participant_info"
+	TypeParticipantList MessageType = "participant_list"
 
 	// Both directions
 	TypePing  MessageType = "ping"
@@ -123,9 +124,20 @@ type SessionReady struct {
 	JoinURL   string `json:"join_url"`
 }
 
-// ParticipantInfo is broadcast to browsers when someone joins or leaves.
-type ParticipantInfo struct {
-	Count int `json:"count"`
+// Identify is sent by the browser immediately after connecting.
+type Identify struct {
+	Name string `json:"name"`
+}
+
+// Participant describes a connected user in a session.
+type Participant struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// ParticipantList is broadcast to all browsers when someone joins or leaves.
+type ParticipantList struct {
+	Participants []Participant `json:"participants"`
 }
 
 // Error carries an error message.

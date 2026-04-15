@@ -4,11 +4,13 @@ let ws = null;
 let openFiles = new Map(); // path -> content string
 let activeFile = null;
 let sessionId = null;
+let userName = null;
+let myColor = null;
 let editorView = null;
 
-// --- Connection ---
+// --- Connection (two-step: session ID, then name) ---
 
-window.joinSession = function() {
+window.submitSession = function() {
   let input = document.getElementById('session-input').value.trim();
   if (!input) return;
 
@@ -18,6 +20,30 @@ window.joinSession = function() {
   }
 
   sessionId = input;
+  document.getElementById('connect-error').textContent = '';
+
+  // Move to name step
+  document.getElementById('step-session').style.display = 'none';
+  document.getElementById('step-name').style.display = '';
+
+  const nameInput = document.getElementById('name-input');
+  // Restore saved name from localStorage
+  const saved = localStorage.getItem('pairpad-name');
+  if (saved) nameInput.value = saved;
+  nameInput.focus();
+};
+
+window.joinSession = function() {
+  const nameInput = document.getElementById('name-input');
+  userName = nameInput.value.trim();
+  if (!userName) {
+    nameInput.focus();
+    return;
+  }
+
+  // Remember the name for next time
+  localStorage.setItem('pairpad-name', userName);
+
   const err = document.getElementById('connect-error');
   err.textContent = '';
 
@@ -27,6 +53,9 @@ window.joinSession = function() {
   ws = new WebSocket(url);
 
   ws.onopen = () => {
+    // Send identify immediately
+    send('identify', { name: userName });
+
     document.getElementById('connect-overlay').style.display = 'none';
     document.getElementById('ide').style.display = 'flex';
     document.getElementById('session-id-display').textContent = sessionId;
@@ -43,6 +72,9 @@ window.joinSession = function() {
       setStatus('Disconnected — session ended or daemon stopped');
     } else {
       err.textContent = 'Could not connect. Check the session ID and try again.';
+      // Reset back to session step
+      document.getElementById('step-name').style.display = 'none';
+      document.getElementById('step-session').style.display = '';
     }
   };
 
@@ -59,8 +91,11 @@ window.joinSession = function() {
   };
 };
 
-// Allow Enter key to submit
+// Enter key handlers
 document.getElementById('session-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') window.submitSession();
+});
+document.getElementById('name-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') window.joinSession();
 });
 
@@ -70,10 +105,13 @@ function handleMessage(envelope) {
   const payload = JSON.parse(atob(envelope.payload));
 
   switch (envelope.type) {
+    case 'your_color':
+      myColor = payload.color;
+      break;
     case 'file_tree':
       renderFileTree(payload.files);
       break;
-    case 'file_content':
+    case 'file_content': {
       const content = decodeContent(payload.content);
       openFiles.set(payload.path, content);
       addTab(payload.path);
@@ -81,11 +119,13 @@ function handleMessage(envelope) {
       activateTab(payload.path);
       setStatus(payload.path);
       break;
-    case 'file_changed':
+    }
+    case 'file_changed': {
       const changed = decodeContent(payload.content);
       openFiles.set(payload.path, changed);
       updateFileContent(payload.path, changed);
       break;
+    }
     case 'file_deleted':
       openFiles.delete(payload.path);
       removeTab(payload.path);
@@ -95,8 +135,8 @@ function handleMessage(envelope) {
         switchToLastTab();
       }
       break;
-    case 'participant_info':
-      document.getElementById('participant-count').textContent = payload.count;
+    case 'participant_list':
+      renderParticipants(payload.participants);
       break;
   }
 }
@@ -104,6 +144,35 @@ function handleMessage(envelope) {
 function decodeContent(b64) {
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+// --- Participants ---
+
+function renderParticipants(participants) {
+  const container = document.getElementById('participant-list');
+  container.innerHTML = '';
+
+  for (const p of participants) {
+    const badge = document.createElement('div');
+    badge.className = 'participant-badge';
+
+    const dot = document.createElement('span');
+    dot.className = 'participant-dot';
+    dot.style.background = p.color;
+
+    const name = document.createElement('span');
+    name.className = 'participant-name';
+    if (p.name === userName) {
+      name.classList.add('you');
+      name.textContent = `${p.name} (you)`;
+    } else {
+      name.textContent = p.name;
+    }
+
+    badge.appendChild(dot);
+    badge.appendChild(name);
+    container.appendChild(badge);
+  }
 }
 
 // --- File tree ---
@@ -304,5 +373,5 @@ function setStatus(text) {
 
 if (location.hash && location.hash.length > 1) {
   document.getElementById('session-input').value = location.hash.slice(1);
-  window.joinSession();
+  window.submitSession();
 }
