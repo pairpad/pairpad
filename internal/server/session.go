@@ -24,11 +24,13 @@ var participantColors = []string{
 
 // participant tracks a connected browser user.
 type participant struct {
-	conn       *websocket.Conn
-	name       string
-	color      string
-	cursorFile string
-	cursorLine int
+	conn          *websocket.Conn
+	name          string
+	color         string
+	cursorFile    string
+	cursorLine    int
+	selectionFrom int
+	selectionTo   int
 }
 
 // session represents an active pairing session with a connected daemon
@@ -100,12 +102,14 @@ func (s *session) getParticipantList() []protocol.Participant {
 	return list
 }
 
-func (s *session) updateCursor(conn *websocket.Conn, file string, line int) {
+func (s *session) updateCursor(conn *websocket.Conn, file string, line, selFrom, selTo int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if p, ok := s.participants[conn]; ok {
 		p.cursorFile = file
 		p.cursorLine = line
+		p.selectionFrom = selFrom
+		p.selectionTo = selTo
 	}
 }
 
@@ -118,10 +122,12 @@ func (s *session) getCursorState() []protocol.CursorInfo {
 			continue
 		}
 		cursors = append(cursors, protocol.CursorInfo{
-			Name:  p.name,
-			Color: p.color,
-			File:  p.cursorFile,
-			Line:  p.cursorLine,
+			Name:          p.name,
+			Color:         p.color,
+			File:          p.cursorFile,
+			Line:          p.cursorLine,
+			SelectionFrom: p.selectionFrom,
+			SelectionTo:   p.selectionTo,
 		})
 	}
 	return cursors

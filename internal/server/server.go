@@ -280,7 +280,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
-			sess.updateCursor(conn, msg.File, msg.Line)
+			sess.updateCursor(conn, msg.File, msg.Line, msg.SelectionFrom, msg.SelectionTo)
 			s.broadcastCursorState(r.Context(), sess)
 
 		case protocol.TypeCommentAdd:
@@ -343,6 +343,22 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 
 		case protocol.TypeGuideState:
 			sess.broadcastToBrowsers(r.Context(), data)
+
+		case protocol.TypeFollowStatus:
+			// Inject name and broadcast
+			var msg protocol.FollowStatus
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			p := sess.getParticipantByConn(conn)
+			if p == nil {
+				continue
+			}
+			msg.Name = p.name
+			relayData, err := protocol.Encode(protocol.TypeFollowStatus, msg)
+			if err == nil {
+				sess.broadcastToBrowsers(r.Context(), relayData)
+			}
 
 		default:
 			log.Printf("unhandled browser message: %s", env.Type)

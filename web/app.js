@@ -1,4 +1,4 @@
-import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine } from './editor.js';
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights } from './editor.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
@@ -12,6 +12,7 @@ let guideColor = null;
 let following = false;       // am I following the guide?
 let lastGuideState = null;   // latest guide viewport
 let suppressBreakAway = false; // prevent breaking away during programmatic scrolls
+let followers = new Map();     // name -> bool (who is following the guide)
 let sessionId = null;
 let userName = null;
 let myColor = null;
@@ -82,7 +83,13 @@ window.joinSession = function() {
       cursorTimer = setTimeout(() => {
         const file = getCurrentPath();
         if (file) {
-          send('cursor_update', { file, line: getCursorLine() });
+          const sel = getSelectionLines();
+          send('cursor_update', {
+            file,
+            line: getCursorLine(),
+            selection_from: sel ? sel.from : 0,
+            selection_to: sel ? sel.to : 0,
+          });
         }
         broadcastGuideState();
       }, 50);
@@ -90,6 +97,7 @@ window.joinSession = function() {
       // Break away from following when user interacts manually
       if (following && !guideActive && !suppressBreakAway) {
         following = false;
+        send('follow_status', { following: false });
         updateGuideUI();
       }
     });
@@ -186,6 +194,7 @@ function handleMessage(envelope) {
       cursorState = payload.cursors || [];
       renderFileTreePresence();
       renderParticipantLocations();
+      renderPeerSelections();
       break;
     case 'comment_list':
       handleCommentList(payload.comments || []);
@@ -198,6 +207,9 @@ function handleMessage(envelope) {
       break;
     case 'guide_state':
       handleGuideState(payload);
+      break;
+    case 'follow_status':
+      handleFollowStatus(payload);
       break;
   }
 }
@@ -312,6 +324,28 @@ function renderFileTreePresence() {
   }
 }
 
+function renderPeerSelections() {
+  const currentFile = getCurrentPath();
+  if (!currentFile) {
+    setPeerHighlights([]);
+    return;
+  }
+
+  const selections = [];
+  for (const cursor of cursorState) {
+    if (cursor.name === userName) continue;
+    if (cursor.file !== currentFile) continue;
+    if (cursor.selection_from && cursor.selection_to && cursor.selection_from !== cursor.selection_to) {
+      selections.push({
+        fromLine: cursor.selection_from,
+        toLine: cursor.selection_to,
+        color: cursor.color,
+      });
+    }
+  }
+  setPeerHighlights(selections);
+}
+
 function matchesTreeItem(item, filePath) {
   // Reconstruct path from the tree item by walking up through siblings/parents
   // Simpler approach: store path as data attribute
@@ -405,6 +439,7 @@ function openFile(path) {
     activateTab(path);
     setStatus(path);
     refreshCommentGutter();
+    renderPeerSelections();
   } else {
     send('open_file', { path });
   }
@@ -785,6 +820,7 @@ window.toggleGuide = function() {
 window.toggleFollow = function() {
   if (!guideName || guideName === userName) return;
   following = !following;
+  send('follow_status', { following });
   updateGuideUI();
   if (following && lastGuideState) {
     applyGuideState(lastGuideState);
@@ -794,11 +830,38 @@ window.toggleFollow = function() {
 function handleGuideStart(payload) {
   guideName = payload.name;
   guideColor = payload.color;
+  followers.clear();
   // Auto-follow if someone else starts guiding (not yourself)
   if (guideName !== userName) {
     following = true;
+    send('follow_status', { following: true });
   }
   updateGuideUI();
+}
+
+function handleFollowStatus(payload) {
+  followers.set(payload.name, payload.following);
+  updateGuideUI();
+  // Update participant badges with follow indicators
+  renderFollowIndicators();
+}
+
+function renderFollowIndicators() {
+  // Add/remove follow indicators on participant badges
+  document.querySelectorAll('.participant-badge .follow-indicator').forEach(el => el.remove());
+
+  if (!guideName) return;
+
+  for (const [name, isFollowing] of followers) {
+    const badge = document.querySelector(`.participant-badge[data-name="${CSS.escape(name)}"]`);
+    if (badge) {
+      const indicator = document.createElement('span');
+      indicator.className = 'follow-indicator';
+      indicator.textContent = isFollowing ? '\u{1F441}' : '';
+      indicator.title = isFollowing ? 'Following the guide' : 'Not following';
+      badge.appendChild(indicator);
+    }
+  }
 }
 
 function handleGuideStop() {
@@ -808,8 +871,10 @@ function handleGuideStop() {
   guideColor = null;
   following = false;
   lastGuideState = null;
+  followers.clear();
   setGuideHighlight(null, null, null);
   setGuideCursorLine(null, null);
+  renderFollowIndicators();
   updateGuideUI();
 }
 
@@ -896,7 +961,10 @@ function updateGuideUI() {
     btn.textContent = 'Stop Guiding';
     btn.classList.add('active');
     banner.style.display = 'flex';
-    bannerText.textContent = 'You are guiding this session';
+    const followCount = [...followers.values()].filter(Boolean).length;
+    const totalOthers = participants.length - 1;
+    const countText = totalOthers > 0 ? ` (${followCount}/${totalOthers} following)` : '';
+    bannerText.textContent = `You are guiding this session${countText}`;
     banner.style.background = myColor + '22';
     banner.style.borderColor = myColor;
     followBtn.style.display = 'none';

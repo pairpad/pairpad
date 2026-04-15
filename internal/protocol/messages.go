@@ -36,6 +36,7 @@ const (
 	TypeGuideStart     MessageType = "guide_start"
 	TypeGuideStop      MessageType = "guide_stop"
 	TypeGuideState     MessageType = "guide_state"
+	TypeFollowStatus   MessageType = "follow_status"
 
 	// Server → Browser
 	TypeParticipantList MessageType = "participant_list"
@@ -152,16 +153,20 @@ type ParticipantList struct {
 
 // CursorUpdate is sent by a browser when its cursor position changes.
 type CursorUpdate struct {
-	File string `json:"file"`
-	Line int    `json:"line"`
+	File          string `json:"file"`
+	Line          int    `json:"line"`
+	SelectionFrom int    `json:"selection_from,omitempty"`
+	SelectionTo   int    `json:"selection_to,omitempty"`
 }
 
 // CursorInfo describes one participant's cursor position.
 type CursorInfo struct {
-	Name  string `json:"name"`
-	Color string `json:"color"`
-	File  string `json:"file"`
-	Line  int    `json:"line"`
+	Name          string `json:"name"`
+	Color         string `json:"color"`
+	File          string `json:"file"`
+	Line          int    `json:"line"`
+	SelectionFrom int    `json:"selection_from,omitempty"`
+	SelectionTo   int    `json:"selection_to,omitempty"`
 }
 
 // CursorState is broadcast to all browsers with everyone's cursor positions.
@@ -230,6 +235,12 @@ type GuideState struct {
 	CursorLine    int    `json:"cursor_line"`
 	SelectionFrom int    `json:"selection_from,omitempty"`
 	SelectionTo   int    `json:"selection_to,omitempty"`
+}
+
+// FollowStatus is broadcast when a user follows/unfollows the guide.
+type FollowStatus struct {
+	Name      string `json:"name"`
+	Following bool   `json:"following"`
 }
 
 // Error carries an error message.

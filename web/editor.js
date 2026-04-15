@@ -138,6 +138,7 @@ function baseExtensions(onSave) {
   return [
     commentMarkerField,
     commentGutter,
+    peerHighlightField,
     guideHighlightField,
     guideCursorField,
     lineNumbers(),
@@ -333,6 +334,49 @@ const guideHighlightField = StateField.define({
   },
   provide: f => EditorView.decorations.from(f),
 });
+
+// Peer selection highlights (always-on presence)
+const peerHighlightEffect = StateEffect.define();
+
+const peerHighlightField = StateField.define({
+  create() { return Decoration.none; },
+  update(deco, tr) {
+    for (const e of tr.effects) {
+      if (e.is(peerHighlightEffect)) {
+        return e.value;
+      }
+    }
+    return deco.map(tr.changes);
+  },
+  provide: f => EditorView.decorations.from(f),
+});
+
+// Set all peer selection highlights at once. Each entry: { fromLine, toLine, color }
+export function setPeerHighlights(selections) {
+  if (!view) return;
+
+  if (!selections || selections.length === 0) {
+    view.dispatch({ effects: peerHighlightEffect.of(Decoration.none) });
+    return;
+  }
+
+  const markers = [];
+  for (const { fromLine, toLine, color } of selections) {
+    if (fromLine < 1 || toLine < 1 || fromLine > view.state.doc.lines) continue;
+    const from = view.state.doc.line(Math.min(fromLine, view.state.doc.lines)).from;
+    const to = view.state.doc.line(Math.min(toLine, view.state.doc.lines)).to;
+    markers.push(
+      Decoration.mark({
+        attributes: { style: `background: ${color}20; border-bottom: 1px solid ${color}55;` },
+      }).range(from, to)
+    );
+  }
+
+  markers.sort((a, b) => a.from - b.from || a.to - b.to);
+  view.dispatch({
+    effects: peerHighlightEffect.of(Decoration.set(markers)),
+  });
+}
 
 // Guide cursor line decoration
 const guideCursorEffect = StateEffect.define();
