@@ -325,6 +325,10 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			// Relay directly to daemon
 			sess.daemon.Write(r.Context(), websocket.MessageText, data)
 
+		case protocol.TypeTourSave, protocol.TypeTourDelete:
+			// Relay to daemon for persistence
+			sess.daemon.Write(r.Context(), websocket.MessageText, data)
+
 		case protocol.TypeGuideStart:
 			// Inject guide's name and color, broadcast to all browsers
 			var msg protocol.GuideStart

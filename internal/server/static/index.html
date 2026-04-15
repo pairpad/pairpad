@@ -238,9 +238,9 @@
       flex: 1;
       overflow: hidden;
     }
-    /* Comment gutter in CodeMirror */
-    .cm-comment-gutter { width: 14px; cursor: pointer; }
-    .cm-comment-gutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; }
+    /* Unified marker gutter */
+    .cm-marker-gutter { width: 20px; cursor: pointer; }
+    .cm-marker-gutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; }
 
     /* Comment sidebar */
     #comment-sidebar {
@@ -461,8 +461,6 @@
       color: #a6adc8;
       line-height: 1.5;
     }
-    .cm-tour-gutter { width: 22px; cursor: pointer; }
-    .cm-tour-gutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; }
     .tree-tour-indicator {
       font-size: 9px;
       color: #89b4fa;
@@ -479,6 +477,89 @@
       cursor: pointer;
     }
     #tour-toggle-btn:hover { border-color: #89b4fa; color: #cdd6f4; }
+
+    /* Tour creation */
+    #tour-create-panel {
+      background: #181825;
+      border-bottom: 1px solid #313244;
+      padding: 10px 14px;
+      max-height: 250px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    #tour-create-panel input {
+      background: #313244;
+      border: 1px solid #45475a;
+      color: #cdd6f4;
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      outline: none;
+      width: 100%;
+      margin-bottom: 6px;
+    }
+    #tour-create-panel input:focus { border-color: #89b4fa; }
+    .tour-step-edit {
+      background: #313244;
+      border-radius: 4px;
+      padding: 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+    .tour-step-edit .step-location {
+      color: #89b4fa;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+    .tour-step-edit input {
+      margin-bottom: 4px;
+    }
+    .tour-step-edit textarea {
+      background: #313244;
+      border: 1px solid #45475a;
+      color: #cdd6f4;
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      outline: none;
+      width: 100%;
+      resize: vertical;
+      min-height: 40px;
+    }
+    .tour-step-edit textarea:focus { border-color: #89b4fa; }
+    .tour-step-edit .step-remove {
+      color: #f38ba8;
+      font-size: 11px;
+      cursor: pointer;
+      float: right;
+    }
+    .tour-step-edit .step-remove:hover { text-decoration: underline; }
+    .tour-create-hint {
+      color: #585b70;
+      font-size: 11px;
+      margin: 6px 0;
+    }
+    .tour-create-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .tour-create-actions button {
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      border: 1px solid #45475a;
+    }
+    .tour-save-btn {
+      background: #a6e3a1;
+      color: #1e1e2e;
+      border-color: #a6e3a1 !important;
+    }
+    .tour-cancel-btn {
+      background: #313244;
+      color: #a6adc8;
+    }
 
     /* Guide mode */
     #guide-btn {
@@ -590,8 +671,13 @@
             <span id="tour-step-counter"></span>
             <button id="tour-next" onclick="tourNext()">Next</button>
           </div>
+          <div id="tour-actions" style="display:flex;gap:4px;margin-left:auto;">
+            <button onclick="editCurrentTour()" style="background:#313244;border:1px solid #45475a;color:#a6adc8;padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;">Edit</button>
+            <button onclick="startTourCreation()" style="background:#313244;border:1px solid #45475a;color:#a6adc8;padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;">New</button>
+          </div>
           <button id="tour-close-btn" onclick="closeTour()">&times;</button>
         </div>
+        <div id="tour-create-panel" style="display:none"></div>
         <div id="tour-step-panel" style="display:none">
           <div id="tour-step-title"></div>
           <div id="tour-step-desc"></div>

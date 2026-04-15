@@ -226,6 +226,26 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 	case protocol.TypeRequestTours:
 		return d.sendTours(ctx, conn)
 
+	case protocol.TypeTourSave:
+		var tour protocol.Tour
+		if err := protocol.DecodePayload(env, &tour); err != nil {
+			return err
+		}
+		if err := d.tours.saveTour(tour); err != nil {
+			return err
+		}
+		return d.sendTours(ctx, conn)
+
+	case protocol.TypeTourDelete:
+		var msg protocol.TourDelete
+		if err := protocol.DecodePayload(env, &msg); err != nil {
+			return err
+		}
+		if err := d.tours.deleteTour(msg.ID); err != nil {
+			return err
+		}
+		return d.sendTours(ctx, conn)
+
 	case protocol.TypeSessionReady:
 		var msg protocol.SessionReady
 		if err := protocol.DecodePayload(env, &msg); err != nil {

@@ -75,69 +75,25 @@ function getLanguageExtension(filename) {
   return [];
 }
 
-// --- Comment gutter ---
+// --- Unified marker gutter ---
+// A single gutter that shows either comment dots or tour step numbers,
+// depending on what's active. Clicking the line number gutter handles actions.
 
-const commentMarkerEffect = StateEffect.define();
+const markerEffect = StateEffect.define();
 
-class CommentGutterMarker extends GutterMarker {
+class CommentMarker extends GutterMarker {
   constructor(color) {
     super();
     this.color = color;
   }
   toDOM() {
     const el = document.createElement('div');
-    el.style.cssText = `width:6px;height:6px;border-radius:50%;background:${this.color || '#89b4fa'};margin:auto;cursor:pointer;`;
+    el.style.cssText = `width:6px;height:6px;border-radius:50%;background:${this.color || '#89b4fa'};margin:auto;`;
     return el;
   }
 }
 
-const commentMarkerField = StateField.define({
-  create() { return RangeSet.empty; },
-  update(markers, tr) {
-    for (const e of tr.effects) {
-      if (e.is(commentMarkerEffect)) {
-        return e.value;
-      }
-    }
-    return markers.map(tr.changes);
-  },
-});
-
-const commentGutter = gutter({
-  class: 'cm-comment-gutter',
-  markers: (view) => view.state.field(commentMarkerField),
-  domEventHandlers: {
-    click(view, line) {
-      const lineNum = view.state.doc.lineAt(line.from).number;
-      if (window.addCommentAtLine) {
-        window.addCommentAtLine(lineNum);
-      }
-      return true;
-    },
-  },
-});
-
-// Update comment markers for the current file
-export function updateCommentMarkers(commentLines) {
-  if (!view) return;
-  const markers = [];
-  for (const { line, color } of commentLines) {
-    if (line >= 1 && line <= view.state.doc.lines) {
-      const lineInfo = view.state.doc.line(line);
-      markers.push(new CommentGutterMarker(color).range(lineInfo.from));
-    }
-  }
-  markers.sort((a, b) => a.from - b.from);
-  view.dispatch({
-    effects: commentMarkerEffect.of(RangeSet.of(markers)),
-  });
-}
-
-// --- Tour gutter markers ---
-
-const tourMarkerEffect = StateEffect.define();
-
-class TourGutterMarker extends GutterMarker {
+class TourMarker extends GutterMarker {
   constructor(stepNum, color) {
     super();
     this.stepNum = stepNum;
@@ -145,17 +101,17 @@ class TourGutterMarker extends GutterMarker {
   }
   toDOM() {
     const el = document.createElement('div');
-    el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${this.color};color:#1e1e2e;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;`;
+    el.style.cssText = `width:16px;height:16px;border-radius:50%;background:${this.color};color:#1e1e2e;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;`;
     el.textContent = this.stepNum;
     return el;
   }
 }
 
-const tourMarkerField = StateField.define({
+const markerField = StateField.define({
   create() { return RangeSet.empty; },
   update(markers, tr) {
     for (const e of tr.effects) {
-      if (e.is(tourMarkerEffect)) {
+      if (e.is(markerEffect)) {
         return e.value;
       }
     }
@@ -163,48 +119,83 @@ const tourMarkerField = StateField.define({
   },
 });
 
-const tourGutter = gutter({
-  class: 'cm-tour-gutter',
-  markers: (view) => view.state.field(tourMarkerField),
+const unifiedGutter = gutter({
+  class: 'cm-marker-gutter',
+  markers: (view) => view.state.field(markerField),
   domEventHandlers: {
     click(view, line) {
       const lineNum = view.state.doc.lineAt(line.from).number;
-      if (window.onTourMarkerClick) {
-        window.onTourMarkerClick(lineNum);
+      if (window.onGutterClick) {
+        window.onGutterClick(lineNum);
       }
       return true;
     },
   },
 });
 
-// Update tour step markers for the current file.
-// Steps: [{ stepNum, line, color }]
+// Update the unified gutter markers. Tour markers take priority over comment markers.
+export function updateCommentMarkers(commentLines) {
+  currentCommentMarkers = commentLines;
+  refreshUnifiedMarkers();
+}
+
 export function updateTourMarkers(steps) {
+  currentTourMarkers = steps;
+  refreshUnifiedMarkers();
+}
+
+let currentCommentMarkers = [];
+let currentTourMarkers = [];
+
+function refreshUnifiedMarkers() {
   if (!view) return;
   const markers = [];
-  for (const { stepNum, line, color } of steps) {
-    if (line >= 1 && line <= view.state.doc.lines) {
-      const lineInfo = view.state.doc.line(line);
-      markers.push(new TourGutterMarker(stepNum, color).range(lineInfo.from));
+
+  // Tour markers take priority
+  if (currentTourMarkers.length > 0) {
+    for (const { stepNum, line, color } of currentTourMarkers) {
+      if (line >= 1 && line <= view.state.doc.lines) {
+        const lineInfo = view.state.doc.line(line);
+        markers.push(new TourMarker(stepNum, color).range(lineInfo.from));
+      }
     }
   }
+
+  // Comment markers (show on lines that don't already have a tour marker)
+  const tourLines = new Set(currentTourMarkers.map(s => s.line));
+  for (const { line, color } of currentCommentMarkers) {
+    if (tourLines.has(line)) continue;
+    if (line >= 1 && line <= view.state.doc.lines) {
+      const lineInfo = view.state.doc.line(line);
+      markers.push(new CommentMarker(color).range(lineInfo.from));
+    }
+  }
+
   markers.sort((a, b) => a.from - b.from);
   view.dispatch({
-    effects: tourMarkerEffect.of(RangeSet.of(markers)),
+    effects: markerEffect.of(RangeSet.of(markers)),
   });
 }
 
 // Create the base extensions shared across all editor instances
 function baseExtensions(onSave) {
   return [
-    commentMarkerField,
-    commentGutter,
-    tourMarkerField,
-    tourGutter,
+    markerField,
+    unifiedGutter,
     peerHighlightField,
     guideHighlightField,
     guideCursorField,
-    lineNumbers(),
+    lineNumbers({
+      domEventHandlers: {
+        click(view, line) {
+          const lineNum = view.state.doc.lineAt(line.from).number;
+          if (window.onGutterClick) {
+            window.onGutterClick(lineNum);
+          }
+          return true;
+        },
+      },
+    }),
     highlightActiveLineGutter(),
     highlightSpecialChars(),
     history(),

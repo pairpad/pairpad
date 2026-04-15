@@ -34,6 +34,8 @@ const (
 	TypeCommentAdd     MessageType = "comment_add"
 	TypeCommentReply   MessageType = "comment_reply"
 	TypeCommentResolve MessageType = "comment_resolve"
+	TypeTourSave       MessageType = "tour_save"
+	TypeTourDelete     MessageType = "tour_delete"
 	TypeGuideStart     MessageType = "guide_start"
 	TypeGuideStop      MessageType = "guide_stop"
 	TypeGuideState     MessageType = "guide_state"
@@ -260,6 +262,11 @@ type Tour struct {
 // TourList is sent from daemon to browsers with all available tours.
 type TourList struct {
 	Tours []Tour `json:"tours"`
+}
+
+// TourDelete requests deletion of a tour by ID.
+type TourDelete struct {
+	ID string `json:"id"`
 }
 
 // FollowStatus is broadcast when a user follows/unfollows the guide.

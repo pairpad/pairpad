@@ -48,6 +48,49 @@ func (ts *tourStore) load() error {
 	return nil
 }
 
+func (ts *tourStore) save() error {
+	path := filepath.Join(ts.projectDir, pairpadDir, toursFile)
+	wrapper := struct {
+		Tours []protocol.Tour `json:"tours"`
+	}{Tours: ts.tours}
+	data, err := json.MarshalIndent(wrapper, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func (ts *tourStore) saveTour(tour protocol.Tour) error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	// Update existing tour or append new one
+	found := false
+	for i, t := range ts.tours {
+		if t.ID == tour.ID {
+			ts.tours[i] = tour
+			found = true
+			break
+		}
+	}
+	if !found {
+		ts.tours = append(ts.tours, tour)
+	}
+	return ts.save()
+}
+
+func (ts *tourStore) deleteTour(id string) error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	for i, t := range ts.tours {
+		if t.ID == id {
+			ts.tours = append(ts.tours[:i], ts.tours[i+1:]...)
+			return ts.save()
+		}
+	}
+	return nil
+}
+
 func (ts *tourStore) getAll() []protocol.Tour {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()

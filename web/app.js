@@ -13,6 +13,7 @@ let following = false;       // am I following the guide?
 let lastGuideState = null;   // latest guide viewport
 let suppressBreakAway = false; // prevent breaking away during programmatic scrolls
 let followers = new Map();     // name -> bool (who is following the guide)
+let creatingTour = false;      // are we in tour creation mode?
 let sessionId = null;
 let userName = null;
 let myColor = null;
@@ -176,7 +177,11 @@ function handleMessage(envelope) {
         pendingTourStep = null;
         goToTourStep(idx);
       }
-      refreshTourMarkers();
+      // Delay marker refresh to let the new editor state settle
+      requestAnimationFrame(() => {
+        refreshCommentGutter();
+        refreshTourMarkers();
+      });
       break;
     }
     case 'file_changed': {
@@ -448,9 +453,11 @@ function openFile(path) {
     openFileInEditor(path, openFiles.get(path));
     activateTab(path);
     setStatus(path);
-    refreshCommentGutter();
-    renderPeerSelections();
-    refreshTourMarkers();
+    requestAnimationFrame(() => {
+      refreshCommentGutter();
+      renderPeerSelections();
+      refreshTourMarkers();
+    });
   } else {
     send('open_file', { path });
   }
@@ -725,13 +732,44 @@ function jumpToComment(comment) {
 }
 
 // Add comment from gutter click — exposed globally for CodeMirror
+// Unified gutter click handler — routes to tour creation, tour navigation, or comments
+window.onGutterClick = function(line) {
+  if (creatingTour) {
+    window.addTourStepAtLine(line);
+    return;
+  }
+  // If a tour is active and this line has a step, navigate to it
+  if (activeTour) {
+    const currentFile = getCurrentPath();
+    const idx = activeTour.steps.findIndex(s => s.file === currentFile && s.line === line);
+    if (idx >= 0) {
+      goToTourStep(idx);
+      return;
+    }
+  }
+  window.addCommentAtLine(line);
+};
+
 window.addCommentAtLine = function(line) {
+
   const file = getCurrentPath();
   if (!file) return;
 
-  // Show the comment sidebar and scroll to bottom
+  // Show the comment sidebar
   const sidebar = document.getElementById('comment-sidebar');
   sidebar.classList.remove('hidden');
+
+  // If a comment exists on this line, scroll to it instead of creating a new one
+  const existing = comments.find(c => c.file === file && c.line === line && !c.parent_id);
+  if (existing) {
+    const thread = document.querySelector(`.comment-thread[data-comment-id="${CSS.escape(existing.id)}"]`);
+    if (thread) {
+      thread.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      thread.style.outline = '1px solid #89b4fa';
+      setTimeout(() => { thread.style.outline = ''; }, 1500);
+      return;
+    }
+  }
 
   // Create a temporary input at the bottom of the feed
   const feed = document.getElementById('comment-feed');
@@ -1047,6 +1085,19 @@ function handleTourList(tours) {
   if (btn) {
     btn.style.display = tours.length > 0 ? '' : 'none';
   }
+  // Refresh the dropdown if tour bar is visible
+  const bar = document.getElementById('tour-bar');
+  if (bar && bar.style.display === 'flex') {
+    const prevId = activeTour ? activeTour.id : pendingTourSelect;
+    pendingTourSelect = null;
+    populateTourSelect();
+    if (prevId) {
+      // Re-select and reload the tour with updated data
+      selectTourById(prevId);
+      const sel = document.getElementById('tour-select');
+      sel.value = prevId;
+    }
+  }
 }
 
 window.toggleTourBar = function() {
@@ -1085,6 +1136,7 @@ function selectTourById(id) {
     goToTourStep(0);
   }
   refreshTourMarkers();
+  refreshCommentGutter();
   renderTourFileTreeIndicators();
 }
 
@@ -1130,7 +1182,10 @@ function goToTourStep(idx) {
     activateTab(step.file);
     scrollToLine(step.line);
     setStatus(step.file);
-    refreshTourMarkers();
+    requestAnimationFrame(() => {
+      refreshTourMarkers();
+      refreshCommentGutter();
+    });
   } else {
     pendingTourStep = idx;
     send('open_file', { path: step.file });
@@ -1181,6 +1236,180 @@ function renderTourFileTreeIndicators() {
       item.appendChild(indicator);
     }
   }
+}
+
+// --- Tour creation ---
+
+let newTourSteps = [];
+
+let editingTourId = null; // non-null when editing an existing tour
+let pendingTourSelect = null; // tour ID to auto-select after tour_list refresh
+
+window.startTourCreation = function() {
+  editingTourId = null;
+  creatingTour = true;
+  newTourSteps = [];
+  activeTour = null;
+  activeTourStep = -1;
+  updateTourMarkers([]);
+  showTourCreationPanel('', '');
+};
+
+window.deleteCurrentTour = function() {
+  const id = editingTourId || (activeTour ? activeTour.id : null);
+  if (!id) return;
+  const title = (activeTour ? activeTour.title : '') || id;
+  if (!confirm(`Delete tour "${title}"?`)) return;
+  send('tour_delete', { id });
+  if (creatingTour) cancelTourCreation();
+  activeTour = null;
+  activeTourStep = -1;
+  updateTourMarkers([]);
+  renderTourFileTreeIndicators();
+  document.getElementById('tour-step-panel').style.display = 'none';
+};
+
+window.editCurrentTour = function() {
+  if (!activeTour) return;
+  editingTourId = activeTour.id;
+  creatingTour = true;
+  newTourSteps = activeTour.steps.map(s => ({ ...s }));
+  activeTourStep = -1;
+  showTourCreationPanel(activeTour.title, activeTour.description || '');
+  renderNewTourSteps();
+  refreshCreationMarkers();
+};
+
+function showTourCreationPanel(title, desc) {
+  const panel = document.getElementById('tour-create-panel');
+  panel.style.display = 'block';
+  const deleteBtn = editingTourId
+    ? `<button class="tour-cancel-btn" style="color:#f38ba8;" onclick="deleteCurrentTour()">Delete Tour</button>`
+    : '';
+  panel.innerHTML = `
+    <input id="new-tour-title" placeholder="Tour title" value="${escapeAttr(title)}" autofocus>
+    <input id="new-tour-desc" placeholder="Tour description (optional)" value="${escapeAttr(desc)}">
+    <div class="tour-create-hint">Click any line number in the gutter to add a step</div>
+    <div id="new-tour-steps"></div>
+    <div class="tour-create-actions">
+      <button class="tour-save-btn" onclick="saveTour()">Save</button>
+      <button class="tour-cancel-btn" onclick="cancelTourCreation()">Cancel</button>
+      ${deleteBtn}
+    </div>
+  `;
+
+  // Hide the regular tour nav and actions
+  document.getElementById('tour-select').style.display = 'none';
+  document.querySelector('.tour-nav').style.display = 'none';
+  document.getElementById('tour-actions').style.display = 'none';
+  document.getElementById('tour-step-panel').style.display = 'none';
+}
+
+window.cancelTourCreation = function() {
+  creatingTour = false;
+  editingTourId = null;
+  newTourSteps = [];
+  document.getElementById('tour-create-panel').style.display = 'none';
+  document.getElementById('tour-select').style.display = '';
+  document.querySelector('.tour-nav').style.display = '';
+  document.getElementById('tour-actions').style.display = 'flex';
+  updateTourMarkers([]);
+};
+
+// Gutter click during tour creation — add a step
+window.addTourStepAtLine = function(line) {
+  const file = getCurrentPath();
+  if (!file) return;
+
+  newTourSteps.push({ file, line, title: '', description: '' });
+  renderNewTourSteps();
+  refreshCreationMarkers();
+
+  // Focus the new step's title input
+  const lastInput = document.querySelector(`#new-tour-steps .tour-step-edit:last-child input[data-field="title"]`);
+  if (lastInput) {
+    lastInput.focus();
+    lastInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+};
+
+function renderNewTourSteps() {
+  const container = document.getElementById('new-tour-steps');
+  if (!container) return;
+  container.innerHTML = '';
+
+  for (let i = 0; i < newTourSteps.length; i++) {
+    const step = newTourSteps[i];
+    const div = document.createElement('div');
+    div.className = 'tour-step-edit';
+    div.innerHTML = `
+      <span class="step-remove" data-idx="${i}">remove</span>
+      <div class="step-location">${i + 1}. ${step.file.split('/').pop()}:${step.line}</div>
+      <input placeholder="Step title" value="${escapeAttr(step.title)}" data-idx="${i}" data-field="title">
+      <textarea placeholder="Description" data-idx="${i}" data-field="description">${escapeHtml(step.description)}</textarea>
+    `;
+    container.appendChild(div);
+  }
+
+  // Bind events
+  container.querySelectorAll('input[data-field], textarea[data-field]').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      const field = e.target.dataset.field;
+      newTourSteps[idx][field] = e.target.value;
+    });
+  });
+  container.querySelectorAll('.step-remove').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      newTourSteps.splice(idx, 1);
+      renderNewTourSteps();
+      refreshCreationMarkers();
+    });
+  });
+}
+
+function refreshCreationMarkers() {
+  const currentFile = getCurrentPath();
+  const steps = [];
+  for (let i = 0; i < newTourSteps.length; i++) {
+    if (newTourSteps[i].file === currentFile) {
+      steps.push({ stepNum: i + 1, line: newTourSteps[i].line, color: TOUR_COLOR });
+    }
+  }
+  updateTourMarkers(steps);
+}
+
+window.saveTour = function() {
+  const title = document.getElementById('new-tour-title')?.value.trim();
+  if (!title) {
+    document.getElementById('new-tour-title').focus();
+    return;
+  }
+  if (newTourSteps.length === 0) return;
+
+  const tour = {
+    id: editingTourId || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    title,
+    description: document.getElementById('new-tour-desc')?.value.trim() || '',
+    steps: newTourSteps.map(s => ({
+      file: s.file,
+      line: s.line,
+      title: s.title || `Step at ${s.file.split('/').pop()}:${s.line}`,
+      description: s.description || '',
+    })),
+  };
+
+  pendingTourSelect = tour.id;
+  send('tour_save', tour);
+  cancelTourCreation();
+};
+
+function escapeAttr(s) {
+  return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // --- Auto-join from URL hash ---
