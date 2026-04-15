@@ -2,3 +2,6 @@ bin/
 *.db
 node_modules/
 internal/server/static/app.js
+.pairpad/
+/pairpad
+/server

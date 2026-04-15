@@ -241,6 +241,166 @@
       flex: 1;
       overflow: hidden;
     }
+    /* Comment gutter in CodeMirror */
+    .cm-comment-gutter { width: 14px; cursor: pointer; }
+    .cm-comment-gutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; }
+
+    /* Comment sidebar */
+    #comment-sidebar {
+      width: 300px;
+      background: #181825;
+      border-left: 1px solid #313244;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    #comment-sidebar.hidden { display: none; }
+    #comment-header {
+      padding: 10px 12px;
+      font-size: 11px;
+      color: #585b70;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #313244;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #comment-header .toggle-btn {
+      cursor: pointer;
+      color: #585b70;
+      font-size: 14px;
+    }
+    #comment-header .toggle-btn:hover { color: #cdd6f4; }
+    #comment-feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+    .comment-thread {
+      padding: 8px 12px;
+      border-bottom: 1px solid #313244;
+    }
+    .comment-thread.resolved {
+      opacity: 0.4;
+    }
+    .comment-thread.orphaned {
+      border-left: 2px solid #f38ba8;
+    }
+    .comment-orphaned-badge {
+      font-size: 10px;
+      color: #f38ba8;
+      margin-bottom: 4px;
+    }
+    .comment-location {
+      font-size: 11px;
+      color: #89b4fa;
+      cursor: pointer;
+      margin-bottom: 4px;
+    }
+    .comment-location:hover { text-decoration: underline; }
+    .comment-entry {
+      margin-bottom: 6px;
+    }
+    .comment-author {
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 4px;
+    }
+    .comment-time {
+      font-size: 10px;
+      color: #585b70;
+    }
+    .comment-body {
+      font-size: 13px;
+      line-height: 1.4;
+      margin-top: 2px;
+      word-break: break-word;
+    }
+    .comment-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .comment-actions button {
+      background: none;
+      border: none;
+      color: #585b70;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0;
+    }
+    .comment-actions button:hover { color: #cdd6f4; }
+    .comment-reply-input {
+      display: none;
+      margin-top: 6px;
+    }
+    .comment-reply-input input {
+      width: 100%;
+      background: #313244;
+      border: 1px solid #45475a;
+      color: #cdd6f4;
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      outline: none;
+    }
+    .comment-reply-input input:focus { border-color: #89b4fa; }
+    #comment-toggle-btn {
+      position: absolute;
+      right: 0;
+      top: 37px;
+      background: #181825;
+      border: 1px solid #313244;
+      border-right: none;
+      color: #585b70;
+      padding: 4px 6px;
+      cursor: pointer;
+      font-size: 12px;
+      border-radius: 4px 0 0 4px;
+      z-index: 10;
+    }
+    #comment-toggle-btn:hover { color: #cdd6f4; }
+    .comment-count-badge {
+      background: #89b4fa;
+      color: #1e1e2e;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 0 5px;
+      border-radius: 8px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    /* Toast */
+    #toast-container {
+      position: fixed;
+      bottom: 32px;
+      right: 16px;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      background: #313244;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #cdd6f4;
+      cursor: pointer;
+      max-width: 320px;
+      animation: toast-in 0.2s ease-out;
+    }
+    .toast:hover { background: #45475a; }
+    .toast .toast-author { font-weight: 600; }
+    .toast .toast-location { color: #89b4fa; font-size: 11px; }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
     /* Status bar */
     #status {
       height: 22px;
@@ -296,11 +456,20 @@
         <div id="sidebar-header">Explorer</div>
         <div id="file-tree"></div>
       </div>
-      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;">
         <div id="tabs"></div>
         <div id="editor-container"></div>
+        <button id="comment-toggle-btn" onclick="toggleCommentSidebar()">Comments</button>
+      </div>
+      <div id="comment-sidebar">
+        <div id="comment-header">
+          <span>Comments</span>
+          <span class="toggle-btn" onclick="toggleCommentSidebar()">&times;</span>
+        </div>
+        <div id="comment-feed"></div>
       </div>
     </div>
+    <div id="toast-container"></div>
     <div id="status">
       <span id="status-text">Connected</span>
     </div>

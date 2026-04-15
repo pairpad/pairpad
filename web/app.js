@@ -1,4 +1,4 @@
-import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine } from './editor.js';
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers } from './editor.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
@@ -160,6 +160,9 @@ function handleMessage(envelope) {
       cursorState = payload.cursors || [];
       renderFileTreePresence();
       renderParticipantLocations();
+      break;
+    case 'comment_list':
+      handleCommentList(payload.comments || []);
       break;
   }
 }
@@ -366,6 +369,7 @@ function openFile(path) {
     openFileInEditor(path, openFiles.get(path));
     activateTab(path);
     setStatus(path);
+    refreshCommentGutter();
   } else {
     send('open_file', { path });
   }
@@ -402,6 +406,7 @@ function addTab(path) {
         openFileInEditor(path, openFiles.get(path));
       }
       setStatus(path);
+      refreshCommentGutter();
     });
 
     tabs.appendChild(tab);
@@ -473,6 +478,252 @@ function send(type, payload) {
 
 function setStatus(text) {
   document.getElementById('status-text').textContent = text;
+}
+
+// --- Comments ---
+
+let comments = [];
+let previousCommentIds = new Set();
+
+function refreshCommentGutter() {
+  const file = getCurrentPath();
+  if (!file) return;
+  const lines = comments
+    .filter(c => c.file === file && !c.parent_id && !c.resolved && !c.orphaned)
+    .map(c => ({ line: c.line, color: c.color }));
+  updateCommentMarkers(lines);
+}
+
+function handleCommentList(newComments) {
+  const oldComments = comments;
+  comments = newComments;
+
+  // Detect new comments for toasts
+  const newIds = new Set(newComments.map(c => c.id));
+  for (const c of newComments) {
+    if (!previousCommentIds.has(c.id) && c.author !== userName && !c.parent_id) {
+      showToast(c);
+    }
+  }
+  previousCommentIds = newIds;
+
+  renderCommentFeed();
+  renderFileTreeCommentBadges();
+  refreshCommentGutter();
+}
+
+function renderCommentFeed() {
+  const feed = document.getElementById('comment-feed');
+  feed.innerHTML = '';
+
+  // Group into threads: root comments and their replies
+  const roots = comments.filter(c => !c.parent_id);
+  const replies = comments.filter(c => c.parent_id);
+
+  for (const root of roots) {
+    const thread = document.createElement('div');
+    const classes = ['comment-thread'];
+    if (root.resolved) classes.push('resolved');
+    if (root.orphaned) classes.push('orphaned');
+    thread.className = classes.join(' ');
+    thread.dataset.commentId = root.id;
+
+    // Orphaned badge
+    if (root.orphaned) {
+      const badge = document.createElement('div');
+      badge.className = 'comment-orphaned-badge';
+      badge.textContent = 'Code changed — this comment may no longer apply';
+      thread.appendChild(badge);
+    }
+
+    // Location link — always clickable, even for orphaned (jumps to last-known location)
+    const loc = document.createElement('div');
+    loc.className = 'comment-location';
+    loc.textContent = `${root.file.split('/').pop()}:${root.line}`;
+    loc.addEventListener('click', () => jumpToComment(root));
+    thread.appendChild(loc);
+
+    // Root comment
+    thread.appendChild(renderCommentEntry(root));
+
+    // Replies
+    const threadReplies = replies.filter(r => r.parent_id === root.id);
+    for (const reply of threadReplies) {
+      const replyEl = renderCommentEntry(reply);
+      replyEl.style.paddingLeft = '12px';
+      replyEl.style.borderLeft = `2px solid ${reply.color}`;
+      replyEl.style.marginLeft = '8px';
+      thread.appendChild(replyEl);
+    }
+
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'comment-actions';
+
+    const replyBtn = document.createElement('button');
+    replyBtn.textContent = 'Reply';
+    replyBtn.addEventListener('click', () => {
+      const input = thread.querySelector('.comment-reply-input');
+      input.style.display = input.style.display === 'none' ? 'block' : 'none';
+      if (input.style.display === 'block') input.querySelector('input').focus();
+    });
+    actions.appendChild(replyBtn);
+
+    const resolveBtn = document.createElement('button');
+    resolveBtn.textContent = root.resolved ? 'Unresolve' : 'Resolve';
+    resolveBtn.addEventListener('click', () => {
+      send('comment_resolve', { comment_id: root.id });
+    });
+    actions.appendChild(resolveBtn);
+
+    thread.appendChild(actions);
+
+    // Reply input
+    const replyInput = document.createElement('div');
+    replyInput.className = 'comment-reply-input';
+    replyInput.style.display = 'none';
+    const input = document.createElement('input');
+    input.placeholder = 'Write a reply...';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && input.value.trim()) {
+        send('comment_reply', { parent_id: root.id, body: input.value.trim() });
+        input.value = '';
+        replyInput.style.display = 'none';
+      }
+      if (e.key === 'Escape') {
+        replyInput.style.display = 'none';
+      }
+    });
+    replyInput.appendChild(input);
+    thread.appendChild(replyInput);
+
+    feed.appendChild(thread);
+  }
+}
+
+function renderCommentEntry(comment) {
+  const entry = document.createElement('div');
+  entry.className = 'comment-entry';
+
+  const header = document.createElement('div');
+  const author = document.createElement('span');
+  author.className = 'comment-author';
+  author.style.color = comment.color;
+  author.textContent = comment.author;
+  header.appendChild(author);
+
+  const time = document.createElement('span');
+  time.className = 'comment-time';
+  const date = new Date(comment.timestamp);
+  time.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  header.appendChild(time);
+
+  entry.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'comment-body';
+  body.textContent = comment.body;
+  entry.appendChild(body);
+
+  return entry;
+}
+
+function jumpToComment(comment) {
+  activeFile = comment.file;
+  if (openFiles.has(comment.file)) {
+    addTab(comment.file);
+    openFileInEditor(comment.file, openFiles.get(comment.file));
+    activateTab(comment.file);
+    scrollToLine(comment.line);
+    setStatus(comment.file);
+  } else {
+    pendingScroll = { file: comment.file, line: comment.line };
+    send('open_file', { path: comment.file });
+  }
+}
+
+// Add comment from gutter click — exposed globally for CodeMirror
+window.addCommentAtLine = function(line) {
+  const file = getCurrentPath();
+  if (!file) return;
+
+  // Show the comment sidebar and scroll to bottom
+  const sidebar = document.getElementById('comment-sidebar');
+  sidebar.classList.remove('hidden');
+
+  // Create a temporary input at the bottom of the feed
+  const feed = document.getElementById('comment-feed');
+  let tempInput = feed.querySelector('.temp-comment-input');
+  if (tempInput) tempInput.remove();
+
+  tempInput = document.createElement('div');
+  tempInput.className = 'comment-thread temp-comment-input';
+
+  const loc = document.createElement('div');
+  loc.className = 'comment-location';
+  loc.textContent = `${file.split('/').pop()}:${line}`;
+  tempInput.appendChild(loc);
+
+  const input = document.createElement('input');
+  input.placeholder = 'Write a comment...';
+  input.style.cssText = 'width:100%;background:#313244;border:1px solid #45475a;color:#cdd6f4;padding:6px 8px;border-radius:4px;font-size:12px;outline:none;';
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && input.value.trim()) {
+      send('comment_add', { file, line, body: input.value.trim() });
+      tempInput.remove();
+    }
+    if (e.key === 'Escape') {
+      tempInput.remove();
+    }
+  });
+  tempInput.appendChild(input);
+  feed.appendChild(tempInput);
+  feed.scrollTop = feed.scrollHeight;
+  input.focus();
+};
+
+// Toggle comment sidebar
+window.toggleCommentSidebar = function() {
+  const sidebar = document.getElementById('comment-sidebar');
+  sidebar.classList.toggle('hidden');
+};
+
+// File tree comment badges
+function renderFileTreeCommentBadges() {
+  // Clear existing badges
+  document.querySelectorAll('.comment-count-badge').forEach(el => el.remove());
+
+  // Count unresolved root comments per file
+  const counts = {};
+  for (const c of comments) {
+    if (!c.parent_id && !c.resolved && !c.orphaned) {
+      counts[c.file] = (counts[c.file] || 0) + 1;
+    }
+  }
+
+  for (const [file, count] of Object.entries(counts)) {
+    const item = document.querySelector(`.tree-item[data-file-path="${CSS.escape(file)}"]`);
+    if (item) {
+      const badge = document.createElement('span');
+      badge.className = 'comment-count-badge';
+      badge.textContent = count;
+      item.appendChild(badge);
+    }
+  }
+}
+
+// Toast notifications
+function showToast(comment) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `<span class="toast-author" style="color:${comment.color}">${comment.author}</span> commented<br><span class="toast-location">${comment.file.split('/').pop()}:${comment.line}</span>`;
+  toast.addEventListener('click', () => {
+    jumpToComment(comment);
+    toast.remove();
+  });
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 5000);
 }
 
 // --- Auto-join from URL hash ---

@@ -17,22 +17,27 @@ const (
 	TypeFileDeleted MessageType = "file_deleted"
 
 	// Server → Daemon
-	TypeSessionReady MessageType = "session_ready"
-	TypeRequestFile  MessageType = "request_file"
+	TypeSessionReady   MessageType = "session_ready"
+	TypeRequestFile    MessageType = "request_file"
+	TypeRequestComments MessageType = "request_comments"
 	TypeWriteFile   MessageType = "write_file"
 	TypeDeleteFile  MessageType = "delete_file"
 	TypeCreateFile  MessageType = "create_file"
 
 	// Browser → Server
-	TypeIdentify     MessageType = "identify"
-	TypeOpenFile     MessageType = "open_file"
-	TypeCloseFile    MessageType = "close_file"
-	TypeSaveFile     MessageType = "save_file"
-	TypeCursorUpdate MessageType = "cursor_update"
+	TypeIdentify       MessageType = "identify"
+	TypeOpenFile       MessageType = "open_file"
+	TypeCloseFile      MessageType = "close_file"
+	TypeSaveFile       MessageType = "save_file"
+	TypeCursorUpdate   MessageType = "cursor_update"
+	TypeCommentAdd     MessageType = "comment_add"
+	TypeCommentReply   MessageType = "comment_reply"
+	TypeCommentResolve MessageType = "comment_resolve"
 
 	// Server → Browser
 	TypeParticipantList MessageType = "participant_list"
 	TypeCursorState     MessageType = "cursor_state"
+	TypeCommentList     MessageType = "comment_list"
 
 	// Both directions
 	TypePing  MessageType = "ping"
@@ -159,6 +164,51 @@ type CursorInfo struct {
 // CursorState is broadcast to all browsers with everyone's cursor positions.
 type CursorState struct {
 	Cursors []CursorInfo `json:"cursors"`
+}
+
+// CommentAdd is sent by a browser to create a new comment thread.
+// Author and Color are populated by the server before relaying to the daemon.
+type CommentAdd struct {
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Body   string `json:"body"`
+	Author string `json:"author,omitempty"`
+	Color  string `json:"color,omitempty"`
+}
+
+// CommentReply is sent by a browser to reply to an existing comment.
+// Author and Color are populated by the server before relaying to the daemon.
+type CommentReply struct {
+	ParentID string `json:"parent_id"`
+	Body     string `json:"body"`
+	Author   string `json:"author,omitempty"`
+	Color    string `json:"color,omitempty"`
+}
+
+// CommentResolve is sent by a browser to resolve/unresolve a comment thread.
+type CommentResolve struct {
+	CommentID string `json:"comment_id"`
+}
+
+// Comment represents a single comment in a thread.
+type Comment struct {
+	ID            string   `json:"id"`
+	ParentID      string   `json:"parent_id,omitempty"`
+	Author        string   `json:"author"`
+	Color         string   `json:"color"`
+	File          string   `json:"file"`
+	Line          int      `json:"line"`
+	Body          string   `json:"body"`
+	Timestamp     int64    `json:"timestamp"`
+	Resolved      bool     `json:"resolved"`
+	AnchorText    string   `json:"anchor_text,omitempty"`
+	AnchorContext []string `json:"anchor_context,omitempty"`
+	Orphaned      bool     `json:"orphaned,omitempty"`
+}
+
+// CommentList is broadcast to all browsers with the full comment state.
+type CommentList struct {
+	Comments []Comment `json:"comments"`
 }
 
 // Error carries an error message.

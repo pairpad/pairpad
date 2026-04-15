@@ -54,6 +54,12 @@ func newSession(id string, daemon *websocket.Conn) *session {
 	}
 }
 
+func (s *session) getParticipantByConn(conn *websocket.Conn) *participant {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.participants[conn]
+}
+
 func (s *session) addBrowser(conn *websocket.Conn) *participant {
 	s.mu.Lock()
 	defer s.mu.Unlock()

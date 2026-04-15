@@ -1,5 +1,5 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, highlightActiveLine, rectangularSelection, crosshairCursor } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, highlightActiveLine, rectangularSelection, crosshairCursor, gutter, GutterMarker } from '@codemirror/view';
+import { EditorState, StateField, StateEffect, RangeSet } from '@codemirror/state';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
@@ -75,9 +75,69 @@ function getLanguageExtension(filename) {
   return [];
 }
 
+// --- Comment gutter ---
+
+const commentMarkerEffect = StateEffect.define();
+
+class CommentGutterMarker extends GutterMarker {
+  constructor(color) {
+    super();
+    this.color = color;
+  }
+  toDOM() {
+    const el = document.createElement('div');
+    el.style.cssText = `width:6px;height:6px;border-radius:50%;background:${this.color || '#89b4fa'};margin:auto;cursor:pointer;`;
+    return el;
+  }
+}
+
+const commentMarkerField = StateField.define({
+  create() { return RangeSet.empty; },
+  update(markers, tr) {
+    for (const e of tr.effects) {
+      if (e.is(commentMarkerEffect)) {
+        return e.value;
+      }
+    }
+    return markers.map(tr.changes);
+  },
+});
+
+const commentGutter = gutter({
+  class: 'cm-comment-gutter',
+  markers: (view) => view.state.field(commentMarkerField),
+  domEventHandlers: {
+    click(view, line) {
+      const lineNum = view.state.doc.lineAt(line.from).number;
+      if (window.addCommentAtLine) {
+        window.addCommentAtLine(lineNum);
+      }
+      return true;
+    },
+  },
+});
+
+// Update comment markers for the current file
+export function updateCommentMarkers(commentLines) {
+  if (!view) return;
+  const markers = [];
+  for (const { line, color } of commentLines) {
+    if (line >= 1 && line <= view.state.doc.lines) {
+      const lineInfo = view.state.doc.line(line);
+      markers.push(new CommentGutterMarker(color).range(lineInfo.from));
+    }
+  }
+  markers.sort((a, b) => a.from - b.from);
+  view.dispatch({
+    effects: commentMarkerEffect.of(RangeSet.of(markers)),
+  });
+}
+
 // Create the base extensions shared across all editor instances
 function baseExtensions(onSave) {
   return [
+    commentMarkerField,
+    commentGutter,
     lineNumbers(),
     highlightActiveLineGutter(),
     highlightSpecialChars(),

@@ -142,7 +142,8 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 				requester.Write(r.Context(), websocket.MessageText, data)
 			}
 
-		case protocol.TypeFileChanged, protocol.TypeFileCreated, protocol.TypeFileDeleted:
+		case protocol.TypeFileChanged, protocol.TypeFileCreated, protocol.TypeFileDeleted,
+			protocol.TypeCommentList:
 			// Broadcast daemon-initiated changes to all browsers
 			sess.broadcastToBrowsers(r.Context(), data)
 
@@ -228,6 +229,12 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Ask daemon to send comments (daemon broadcasts to all browsers)
+	reqComments, err := protocol.Encode(protocol.TypeRequestComments, nil)
+	if err == nil {
+		sess.daemon.Write(r.Context(), websocket.MessageText, reqComments)
+	}
+
 	// Read messages from browser and relay to daemon
 	for {
 		_, data, err := conn.Read(r.Context())
@@ -273,6 +280,44 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 			sess.updateCursor(conn, msg.File, msg.Line)
 			s.broadcastCursorState(r.Context(), sess)
+
+		case protocol.TypeCommentAdd:
+			// Inject author info and relay to daemon
+			var msg protocol.CommentAdd
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			p := sess.getParticipantByConn(conn)
+			if p == nil {
+				continue
+			}
+			msg.Author = p.name
+			msg.Color = p.color
+			relayData, err := protocol.Encode(protocol.TypeCommentAdd, msg)
+			if err == nil {
+				sess.daemon.Write(r.Context(), websocket.MessageText, relayData)
+			}
+
+		case protocol.TypeCommentReply:
+			// Inject author info and relay to daemon
+			var msg protocol.CommentReply
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			p := sess.getParticipantByConn(conn)
+			if p == nil {
+				continue
+			}
+			msg.Author = p.name
+			msg.Color = p.color
+			relayData, err := protocol.Encode(protocol.TypeCommentReply, msg)
+			if err == nil {
+				sess.daemon.Write(r.Context(), websocket.MessageText, relayData)
+			}
+
+		case protocol.TypeCommentResolve:
+			// Relay directly to daemon
+			sess.daemon.Write(r.Context(), websocket.MessageText, data)
 
 		default:
 			log.Printf("unhandled browser message: %s", env.Type)

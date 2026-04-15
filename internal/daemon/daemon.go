@@ -2,17 +2,19 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pairpad/pairpad/internal/protocol"
 	"nhooyr.io/websocket"
 )
-
-
 
 // Config holds the daemon configuration.
 type Config struct {
@@ -22,8 +24,9 @@ type Config struct {
 
 // Daemon connects the local filesystem to the Pairpad server.
 type Daemon struct {
-	cfg    Config
-	ignore *ignoreMatcher
+	cfg      Config
+	ignore   *ignoreMatcher
+	comments *commentStore
 }
 
 // New creates a new Daemon with the given configuration.
@@ -33,9 +36,15 @@ func New(cfg Config) (*Daemon, error) {
 		return nil, fmt.Errorf("project directory does not exist: %s", cfg.ProjectDir)
 	}
 
+	comments, err := newCommentStore(cfg.ProjectDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize comment store: %w", err)
+	}
+
 	return &Daemon{
-		cfg:    cfg,
-		ignore: newIgnoreMatcher(cfg.ProjectDir),
+		cfg:      cfg,
+		ignore:   newIgnoreMatcher(cfg.ProjectDir),
+		comments: comments,
 	}, nil
 }
 
@@ -150,6 +159,62 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		}
 		return os.Remove(fmt.Sprintf("%s/%s", d.cfg.ProjectDir, msg.Path))
 
+	case protocol.TypeCommentAdd:
+		var msg protocol.CommentAdd
+		if err := protocol.DecodePayload(env, &msg); err != nil {
+			return err
+		}
+		comment := protocol.Comment{
+			ID:        generateID(),
+			Author:    msg.Author,
+			Color:     msg.Color,
+			File:      msg.File,
+			Line:      msg.Line,
+			Body:      msg.Body,
+			Timestamp: time.Now().UnixMilli(),
+		}
+		if err := d.comments.add(comment); err != nil {
+			return err
+		}
+		return d.sendComments(ctx, conn)
+
+	case protocol.TypeCommentReply:
+		var msg protocol.CommentReply
+		if err := protocol.DecodePayload(env, &msg); err != nil {
+			return err
+		}
+		parent := d.comments.findComment(msg.ParentID)
+		if parent == nil {
+			return nil
+		}
+		reply := protocol.Comment{
+			ID:        generateID(),
+			ParentID:  msg.ParentID,
+			Author:    msg.Author,
+			Color:     msg.Color,
+			File:      parent.File,
+			Line:      parent.Line,
+			Body:      msg.Body,
+			Timestamp: time.Now().UnixMilli(),
+		}
+		if err := d.comments.add(reply); err != nil {
+			return err
+		}
+		return d.sendComments(ctx, conn)
+
+	case protocol.TypeCommentResolve:
+		var msg protocol.CommentResolve
+		if err := protocol.DecodePayload(env, &msg); err != nil {
+			return err
+		}
+		if err := d.comments.resolve(msg.CommentID); err != nil {
+			return err
+		}
+		return d.sendComments(ctx, conn)
+
+	case protocol.TypeRequestComments:
+		return d.sendComments(ctx, conn)
+
 	case protocol.TypeSessionReady:
 		var msg protocol.SessionReady
 		if err := protocol.DecodePayload(env, &msg); err != nil {
@@ -168,12 +233,25 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 }
 
 func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event watcherEvent) error {
+	// Skip changes to .pairpad/ itself
+	if strings.HasPrefix(event.RelPath, pairpadDir+"/") {
+		return nil
+	}
+
 	switch event.Type {
 	case protocol.TypeFileCreated, protocol.TypeFileChanged:
 		content, err := readFile(d.cfg.ProjectDir, event.RelPath, d.ignore)
 		if err != nil {
 			return err
 		}
+
+		// Re-anchor comments for this file
+		if d.comments.reanchorFile(event.RelPath) {
+			if err := d.sendComments(ctx, conn); err != nil {
+				log.Printf("error broadcasting re-anchored comments: %v", err)
+			}
+		}
+
 		return d.send(ctx, conn, event.Type, protocol.FileContent{
 			Path:    event.RelPath,
 			Content: content,
@@ -188,11 +266,24 @@ func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event 
 	return nil
 }
 
+func (d *Daemon) sendComments(ctx context.Context, conn *websocket.Conn) error {
+	comments := d.comments.getAll()
+	return d.send(ctx, conn, protocol.TypeCommentList, protocol.CommentList{
+		Comments: comments,
+	})
+}
+
 func (d *Daemon) send(ctx context.Context, conn *websocket.Conn, msgType protocol.MessageType, payload any) error {
 	data, err := protocol.Encode(msgType, payload)
 	if err != nil {
 		return err
 	}
 	return conn.Write(ctx, websocket.MessageText, data)
+}
+
+func generateID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
