@@ -27,6 +27,7 @@ type Daemon struct {
 	cfg      Config
 	ignore   *ignoreMatcher
 	comments *commentStore
+	tours    *tourStore
 }
 
 // New creates a new Daemon with the given configuration.
@@ -41,10 +42,16 @@ func New(cfg Config) (*Daemon, error) {
 		return nil, fmt.Errorf("failed to initialize comment store: %w", err)
 	}
 
+	tours, err := newTourStore(cfg.ProjectDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize tour store: %w", err)
+	}
+
 	return &Daemon{
 		cfg:      cfg,
 		ignore:   newIgnoreMatcher(cfg.ProjectDir),
 		comments: comments,
+		tours:    tours,
 	}, nil
 }
 
@@ -216,6 +223,9 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 	case protocol.TypeRequestComments:
 		return d.sendComments(ctx, conn)
 
+	case protocol.TypeRequestTours:
+		return d.sendTours(ctx, conn)
+
 	case protocol.TypeSessionReady:
 		var msg protocol.SessionReady
 		if err := protocol.DecodePayload(env, &msg); err != nil {
@@ -265,6 +275,11 @@ func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event 
 	}
 
 	return nil
+}
+
+func (d *Daemon) sendTours(ctx context.Context, conn *websocket.Conn) error {
+	tours := d.tours.getAll()
+	return d.send(ctx, conn, protocol.TypeTourList, protocol.TourList{Tours: tours})
 }
 
 func (d *Daemon) sendComments(ctx context.Context, conn *websocket.Conn) error {

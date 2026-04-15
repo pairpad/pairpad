@@ -144,7 +144,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case protocol.TypeFileChanged, protocol.TypeFileCreated, protocol.TypeFileDeleted,
-			protocol.TypeCommentList:
+			protocol.TypeCommentList, protocol.TypeTourList:
 			// Broadcast daemon-initiated changes to all browsers
 			sess.broadcastToBrowsers(r.Context(), data)
 
@@ -231,10 +231,14 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Ask daemon to send comments (daemon broadcasts to all browsers)
+	// Ask daemon to send comments and tours (daemon broadcasts to all browsers)
 	reqComments, err := protocol.Encode(protocol.TypeRequestComments, nil)
 	if err == nil {
 		sess.daemon.Write(r.Context(), websocket.MessageText, reqComments)
+	}
+	reqTours, err := protocol.Encode(protocol.TypeRequestTours, nil)
+	if err == nil {
+		sess.daemon.Write(r.Context(), websocket.MessageText, reqTours)
 	}
 
 	// Read messages from browser and relay to daemon

@@ -398,6 +398,88 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
+    /* Tour mode */
+    #tour-bar {
+      display: none;
+      background: #181825;
+      border-bottom: 1px solid #313244;
+      padding: 6px 12px;
+      flex-shrink: 0;
+      font-size: 12px;
+      align-items: center;
+      gap: 8px;
+    }
+    #tour-bar select {
+      background: #313244;
+      border: 1px solid #45475a;
+      color: #cdd6f4;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      outline: none;
+    }
+    #tour-bar .tour-nav {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #tour-bar .tour-nav button {
+      background: #313244;
+      border: 1px solid #45475a;
+      color: #a6adc8;
+      padding: 2px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    #tour-bar .tour-nav button:hover { border-color: #89b4fa; color: #cdd6f4; }
+    #tour-bar .tour-nav button:disabled { opacity: 0.3; cursor: default; }
+    #tour-step-counter { color: #585b70; font-size: 11px; }
+    #tour-close-btn {
+      background: none;
+      border: none;
+      color: #585b70;
+      font-size: 14px;
+      cursor: pointer;
+      margin-left: auto;
+    }
+    #tour-close-btn:hover { color: #cdd6f4; }
+    #tour-step-panel {
+      background: #181825;
+      border-bottom: 1px solid #313244;
+      padding: 10px 14px;
+      flex-shrink: 0;
+    }
+    #tour-step-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #cdd6f4;
+      margin-bottom: 4px;
+    }
+    #tour-step-desc {
+      font-size: 12px;
+      color: #a6adc8;
+      line-height: 1.5;
+    }
+    .cm-tour-gutter { width: 22px; cursor: pointer; }
+    .cm-tour-gutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; }
+    .tree-tour-indicator {
+      font-size: 9px;
+      color: #89b4fa;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+    #tour-toggle-btn {
+      background: #313244;
+      border: 1px solid #45475a;
+      color: #a6adc8;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    #tour-toggle-btn:hover { border-color: #89b4fa; color: #cdd6f4; }
+
     /* Guide mode */
     #guide-btn {
       background: #313244;
@@ -489,7 +571,10 @@
         <span class="session-id" id="session-id-display"></span>
       </div>
       <div class="participants" id="participant-list"></div>
-      <button id="guide-btn" onclick="toggleGuide()">Guide</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button id="tour-toggle-btn" onclick="toggleTourBar()" style="display:none">Tours</button>
+        <button id="guide-btn" onclick="toggleGuide()">Guide</button>
+      </div>
     </div>
     <div id="workspace">
       <div id="sidebar">
@@ -498,6 +583,19 @@
       </div>
       <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;">
         <div id="guide-banner"><span id="guide-banner-text"></span><button id="follow-btn" onclick="toggleFollow()">Follow</button></div>
+        <div id="tour-bar">
+          <select id="tour-select" onchange="selectTour()"></select>
+          <div class="tour-nav">
+            <button id="tour-prev" onclick="tourPrev()">Prev</button>
+            <span id="tour-step-counter"></span>
+            <button id="tour-next" onclick="tourNext()">Next</button>
+          </div>
+          <button id="tour-close-btn" onclick="closeTour()">&times;</button>
+        </div>
+        <div id="tour-step-panel" style="display:none">
+          <div id="tour-step-title"></div>
+          <div id="tour-step-desc"></div>
+        </div>
         <div id="tabs"></div>
         <div id="editor-container"></div>
         <button id="comment-toggle-btn" onclick="toggleCommentSidebar()">Comments</button>

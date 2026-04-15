@@ -133,11 +133,74 @@ export function updateCommentMarkers(commentLines) {
   });
 }
 
+// --- Tour gutter markers ---
+
+const tourMarkerEffect = StateEffect.define();
+
+class TourGutterMarker extends GutterMarker {
+  constructor(stepNum, color) {
+    super();
+    this.stepNum = stepNum;
+    this.color = color;
+  }
+  toDOM() {
+    const el = document.createElement('div');
+    el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${this.color};color:#1e1e2e;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;`;
+    el.textContent = this.stepNum;
+    return el;
+  }
+}
+
+const tourMarkerField = StateField.define({
+  create() { return RangeSet.empty; },
+  update(markers, tr) {
+    for (const e of tr.effects) {
+      if (e.is(tourMarkerEffect)) {
+        return e.value;
+      }
+    }
+    return markers.map(tr.changes);
+  },
+});
+
+const tourGutter = gutter({
+  class: 'cm-tour-gutter',
+  markers: (view) => view.state.field(tourMarkerField),
+  domEventHandlers: {
+    click(view, line) {
+      const lineNum = view.state.doc.lineAt(line.from).number;
+      if (window.onTourMarkerClick) {
+        window.onTourMarkerClick(lineNum);
+      }
+      return true;
+    },
+  },
+});
+
+// Update tour step markers for the current file.
+// Steps: [{ stepNum, line, color }]
+export function updateTourMarkers(steps) {
+  if (!view) return;
+  const markers = [];
+  for (const { stepNum, line, color } of steps) {
+    if (line >= 1 && line <= view.state.doc.lines) {
+      const lineInfo = view.state.doc.line(line);
+      markers.push(new TourGutterMarker(stepNum, color).range(lineInfo.from));
+    }
+  }
+  markers.sort((a, b) => a.from - b.from);
+  view.dispatch({
+    effects: tourMarkerEffect.of(RangeSet.of(markers)),
+  });
+}
+
 // Create the base extensions shared across all editor instances
 function baseExtensions(onSave) {
   return [
     commentMarkerField,
     commentGutter,
+    tourMarkerField,
+    tourGutter,
     peerHighlightField,
     guideHighlightField,
     guideCursorField,

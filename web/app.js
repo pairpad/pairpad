@@ -1,4 +1,4 @@
-import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights } from './editor.js';
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers } from './editor.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
@@ -170,6 +170,13 @@ function handleMessage(envelope) {
         applyGuideState(pendingGuideState);
         pendingGuideState = null;
       }
+      // Handle pending tour step
+      if (pendingTourStep != null) {
+        const idx = pendingTourStep;
+        pendingTourStep = null;
+        goToTourStep(idx);
+      }
+      refreshTourMarkers();
       break;
     }
     case 'file_changed': {
@@ -210,6 +217,9 @@ function handleMessage(envelope) {
       break;
     case 'follow_status':
       handleFollowStatus(payload);
+      break;
+    case 'tour_list':
+      handleTourList(payload.tours || []);
       break;
   }
 }
@@ -440,6 +450,7 @@ function openFile(path) {
     setStatus(path);
     refreshCommentGutter();
     renderPeerSelections();
+    refreshTourMarkers();
   } else {
     send('open_file', { path });
   }
@@ -889,6 +900,34 @@ function applyGuideState(state) {
   suppressBreakAway = true;
   setTimeout(() => { suppressBreakAway = false; }, 200);
 
+  // Sync tour state from guide
+  if (state.tour_id) {
+    const guideTour = allTours.find(t => t.id === state.tour_id);
+    if (guideTour && (!activeTour || activeTour.id !== state.tour_id)) {
+      // Activate the same tour
+      document.getElementById('tour-bar').style.display = 'flex';
+      populateTourSelect();
+      document.getElementById('tour-select').value = state.tour_id;
+      activeTour = guideTour;
+      renderTourFileTreeIndicators();
+    }
+    if (guideTour && state.tour_step >= 0 && state.tour_step !== activeTourStep) {
+      activeTourStep = state.tour_step;
+      const step = guideTour.steps[activeTourStep];
+      if (step) {
+        document.getElementById('tour-step-panel').style.display = 'block';
+        document.getElementById('tour-step-title').textContent = `${activeTourStep + 1}. ${step.title}`;
+        document.getElementById('tour-step-desc').textContent = step.description;
+        document.getElementById('tour-step-counter').textContent = `${activeTourStep + 1} / ${guideTour.steps.length}`;
+        document.getElementById('tour-prev').disabled = activeTourStep === 0;
+        document.getElementById('tour-next').disabled = activeTourStep === guideTour.steps.length - 1;
+      }
+    }
+  } else if (activeTour && guideName && guideName !== userName) {
+    // Guide stopped their tour — close ours too
+    closeTour();
+  }
+
   // Open the file if needed
   if (getCurrentPath() !== state.file) {
     if (openFiles.has(state.file)) {
@@ -925,6 +964,8 @@ function applyGuideState(state) {
     } else {
       setGuideHighlight(null, null, null);
     }
+
+    refreshTourMarkers();
   });
 }
 
@@ -939,13 +980,19 @@ function broadcastGuideState() {
     const file = getCurrentPath();
     if (!file) return;
     const sel = getSelectionLines();
-    send('guide_state', {
+    const state = {
       file,
       top_line: getTopVisibleLine(),
       cursor_line: getCursorLine(),
       selection_from: sel ? sel.from : 0,
       selection_to: sel ? sel.to : 0,
-    });
+    };
+    // Include tour state if a tour is active
+    if (activeTour) {
+      state.tour_id = activeTour.id;
+      state.tour_step = activeTourStep;
+    }
+    send('guide_state', state);
   });
 }
 
@@ -983,6 +1030,156 @@ function updateGuideUI() {
     btn.style.display = '';
     banner.style.display = 'none';
     followBtn.style.display = 'none';
+  }
+}
+
+// --- Tour mode ---
+
+let allTours = [];
+let activeTour = null;   // current Tour object
+let activeTourStep = -1; // current step index
+
+const TOUR_COLOR = '#f9e2af'; // yellow from Catppuccin
+
+function handleTourList(tours) {
+  allTours = tours;
+  const btn = document.getElementById('tour-toggle-btn');
+  if (btn) {
+    btn.style.display = tours.length > 0 ? '' : 'none';
+  }
+}
+
+window.toggleTourBar = function() {
+  const bar = document.getElementById('tour-bar');
+  if (bar.style.display === 'flex') {
+    closeTour();
+  } else {
+    bar.style.display = 'flex';
+    populateTourSelect();
+    if (allTours.length > 0) {
+      selectTourById(allTours[0].id);
+    }
+  }
+};
+
+function populateTourSelect() {
+  const sel = document.getElementById('tour-select');
+  sel.innerHTML = '';
+  for (const tour of allTours) {
+    const opt = document.createElement('option');
+    opt.value = tour.id;
+    opt.textContent = tour.title;
+    sel.appendChild(opt);
+  }
+}
+
+window.selectTour = function() {
+  const sel = document.getElementById('tour-select');
+  selectTourById(sel.value);
+};
+
+function selectTourById(id) {
+  activeTour = allTours.find(t => t.id === id) || null;
+  activeTourStep = -1;
+  if (activeTour && activeTour.steps.length > 0) {
+    goToTourStep(0);
+  }
+  refreshTourMarkers();
+  renderTourFileTreeIndicators();
+}
+
+window.closeTour = function() {
+  document.getElementById('tour-bar').style.display = 'none';
+  document.getElementById('tour-step-panel').style.display = 'none';
+  activeTour = null;
+  activeTourStep = -1;
+  updateTourMarkers([]);
+  renderTourFileTreeIndicators();
+};
+
+window.tourPrev = function() {
+  if (!activeTour || activeTourStep <= 0) return;
+  goToTourStep(activeTourStep - 1);
+};
+
+window.tourNext = function() {
+  if (!activeTour || activeTourStep >= activeTour.steps.length - 1) return;
+  goToTourStep(activeTourStep + 1);
+};
+
+function goToTourStep(idx) {
+  if (!activeTour || idx < 0 || idx >= activeTour.steps.length) return;
+  activeTourStep = idx;
+  const step = activeTour.steps[idx];
+
+  // Update step panel
+  document.getElementById('tour-step-panel').style.display = 'block';
+  document.getElementById('tour-step-title').textContent = `${idx + 1}. ${step.title}`;
+  document.getElementById('tour-step-desc').textContent = step.description;
+
+  // Update counter and nav buttons
+  document.getElementById('tour-step-counter').textContent = `${idx + 1} / ${activeTour.steps.length}`;
+  document.getElementById('tour-prev').disabled = idx === 0;
+  document.getElementById('tour-next').disabled = idx === activeTour.steps.length - 1;
+
+  // Open the file and scroll to the line
+  activeFile = step.file;
+  if (openFiles.has(step.file)) {
+    addTab(step.file);
+    openFileInEditor(step.file, openFiles.get(step.file));
+    activateTab(step.file);
+    scrollToLine(step.line);
+    setStatus(step.file);
+    refreshTourMarkers();
+  } else {
+    pendingTourStep = idx;
+    send('open_file', { path: step.file });
+  }
+}
+
+let pendingTourStep = null;
+
+// Gutter marker click — jump to that step
+window.onTourMarkerClick = function(lineNum) {
+  if (!activeTour) return;
+  const currentFile = getCurrentPath();
+  const idx = activeTour.steps.findIndex(s => s.file === currentFile && s.line === lineNum);
+  if (idx >= 0) {
+    goToTourStep(idx);
+  }
+};
+
+// Refresh tour markers for the current file
+function refreshTourMarkers() {
+  if (!activeTour) {
+    updateTourMarkers([]);
+    return;
+  }
+  const currentFile = getCurrentPath();
+  const steps = [];
+  for (let i = 0; i < activeTour.steps.length; i++) {
+    const step = activeTour.steps[i];
+    if (step.file === currentFile) {
+      steps.push({ stepNum: i + 1, line: step.line, color: TOUR_COLOR });
+    }
+  }
+  updateTourMarkers(steps);
+}
+
+// Show indicators in file tree for files that are in the active tour
+function renderTourFileTreeIndicators() {
+  document.querySelectorAll('.tree-tour-indicator').forEach(el => el.remove());
+  if (!activeTour) return;
+
+  const filesInTour = new Set(activeTour.steps.map(s => s.file));
+  for (const file of filesInTour) {
+    const item = document.querySelector(`.tree-item[data-file-path="${CSS.escape(file)}"]`);
+    if (item) {
+      const indicator = document.createElement('span');
+      indicator.className = 'tree-tour-indicator';
+      indicator.textContent = '\u{1F4D6}';
+      item.appendChild(indicator);
+    }
   }
 }
 

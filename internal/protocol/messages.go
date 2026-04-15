@@ -17,9 +17,10 @@ const (
 	TypeFileDeleted MessageType = "file_deleted"
 
 	// Server → Daemon
-	TypeSessionReady   MessageType = "session_ready"
-	TypeRequestFile    MessageType = "request_file"
+	TypeSessionReady    MessageType = "session_ready"
+	TypeRequestFile     MessageType = "request_file"
 	TypeRequestComments MessageType = "request_comments"
+	TypeRequestTours    MessageType = "request_tours"
 	TypeWriteFile   MessageType = "write_file"
 	TypeDeleteFile  MessageType = "delete_file"
 	TypeCreateFile  MessageType = "create_file"
@@ -38,10 +39,11 @@ const (
 	TypeGuideState     MessageType = "guide_state"
 	TypeFollowStatus   MessageType = "follow_status"
 
-	// Server → Browser
+	// Server → Browser (relayed from daemon)
 	TypeParticipantList MessageType = "participant_list"
 	TypeCursorState     MessageType = "cursor_state"
 	TypeCommentList     MessageType = "comment_list"
+	TypeTourList        MessageType = "tour_list"
 
 	// Both directions
 	TypePing  MessageType = "ping"
@@ -235,6 +237,29 @@ type GuideState struct {
 	CursorLine    int    `json:"cursor_line"`
 	SelectionFrom int    `json:"selection_from,omitempty"`
 	SelectionTo   int    `json:"selection_to,omitempty"`
+	TourID        string `json:"tour_id,omitempty"`
+	TourStep      int    `json:"tour_step,omitempty"` // -1 or omitted = no tour
+}
+
+// TourStep is a single step in a guided tour.
+type TourStep struct {
+	File        string `json:"file"`
+	Line        int    `json:"line"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+// Tour is a named, ordered walkthrough of the codebase.
+type Tour struct {
+	ID          string     `json:"id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description,omitempty"`
+	Steps       []TourStep `json:"steps"`
+}
+
+// TourList is sent from daemon to browsers with all available tours.
+type TourList struct {
+	Tours []Tour `json:"tours"`
 }
 
 // FollowStatus is broadcast when a user follows/unfollows the guide.
