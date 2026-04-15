@@ -1,8 +1,11 @@
-.PHONY: build server daemon clean
+.PHONY: build server daemon clean frontend
 
-build: bin/server bin/pairpad
+build: frontend bin/server bin/pairpad
 
-bin/server: $(shell find cmd/server internal -name '*.go') $(shell find internal/server/static -type f)
+frontend:
+	cd web && npm run build
+
+bin/server: frontend $(shell find cmd/server internal -name '*.go')
 	go build -o bin/server ./cmd/server
 
 bin/pairpad: $(shell find cmd/pairpad internal -name '*.go')

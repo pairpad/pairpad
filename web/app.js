@@ -1,14 +1,14 @@
-// Pairpad frontend — Phase 1 scaffold
-// Connects to server, renders nested file tree, basic text editing with save.
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave } from './editor.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
 let activeFile = null;
 let sessionId = null;
+let editorView = null;
 
 // --- Connection ---
 
-function joinSession() {
+window.joinSession = function() {
   let input = document.getElementById('session-input').value.trim();
   if (!input) return;
 
@@ -31,9 +31,14 @@ function joinSession() {
     document.getElementById('ide').style.display = 'flex';
     document.getElementById('session-id-display').textContent = sessionId;
     setStatus('Connected');
+
+    // Initialize the CodeMirror editor
+    const container = document.getElementById('editor-container');
+    editorView = initEditor(container, saveFile);
+    setOnSave(saveFile);
   };
 
-  ws.onclose = (e) => {
+  ws.onclose = () => {
     if (document.getElementById('ide').style.display === 'flex') {
       setStatus('Disconnected — session ended or daemon stopped');
     } else {
@@ -52,11 +57,11 @@ function joinSession() {
       console.error('Failed to handle message:', e);
     }
   };
-}
+};
 
 // Allow Enter key to submit
 document.getElementById('session-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') joinSession();
+  if (e.key === 'Enter') window.joinSession();
 });
 
 // --- Message handling ---
@@ -69,20 +74,25 @@ function handleMessage(envelope) {
       renderFileTree(payload.files);
       break;
     case 'file_content':
-      openFiles.set(payload.path, decodeContent(payload.content));
+      const content = decodeContent(payload.content);
+      openFiles.set(payload.path, content);
       addTab(payload.path);
-      if (activeFile === payload.path) renderEditor();
+      openFileInEditor(payload.path, content);
+      activateTab(payload.path);
+      setStatus(payload.path);
       break;
     case 'file_changed':
-      openFiles.set(payload.path, decodeContent(payload.content));
-      if (activeFile === payload.path) renderEditor();
+      const changed = decodeContent(payload.content);
+      openFiles.set(payload.path, changed);
+      updateFileContent(payload.path, changed);
       break;
     case 'file_deleted':
       openFiles.delete(payload.path);
       removeTab(payload.path);
+      closeFileInEditor(payload.path);
       if (activeFile === payload.path) {
         activeFile = null;
-        renderEditor();
+        switchToLastTab();
       }
       break;
     case 'participant_info':
@@ -99,7 +109,6 @@ function decodeContent(b64) {
 // --- File tree ---
 
 function renderFileTree(files) {
-  // Build a nested structure from flat paths
   const root = { children: {}, isDir: true };
 
   for (const file of files) {
@@ -109,7 +118,7 @@ function renderFileTree(files) {
       const name = parts[i];
       if (!node.children[name]) {
         node.children[name] = {
-          name: name,
+          name,
           path: parts.slice(0, i + 1).join('/'),
           isDir: i < parts.length - 1 || file.is_dir,
           size: file.size,
@@ -126,7 +135,6 @@ function renderFileTree(files) {
 }
 
 function renderTreeNode(node, container, depth) {
-  // Sort: directories first, then alphabetical
   const entries = Object.values(node.children).sort((a, b) => {
     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
     return a.name.localeCompare(b.name);
@@ -145,7 +153,7 @@ function renderTreeNode(node, container, depth) {
     label.textContent = entry.name;
 
     if (entry.isDir) {
-      icon.textContent = '\u25BE'; // down triangle
+      icon.textContent = '\u25BE';
       item.appendChild(icon);
       item.appendChild(label);
 
@@ -162,7 +170,7 @@ function renderTreeNode(node, container, depth) {
       container.appendChild(item);
       container.appendChild(children);
     } else {
-      icon.textContent = '\u2847'; // braille dot for file
+      icon.textContent = '\u2847';
       item.appendChild(icon);
       item.appendChild(label);
       item.addEventListener('click', (e) => {
@@ -180,7 +188,9 @@ function openFile(path) {
   activeFile = path;
   if (openFiles.has(path)) {
     addTab(path);
-    renderEditor();
+    openFileInEditor(path, openFiles.get(path));
+    activateTab(path);
+    setStatus(path);
   } else {
     send('open_file', { path });
   }
@@ -213,38 +223,47 @@ function addTab(path) {
     tab.addEventListener('click', () => {
       activeFile = path;
       activateTab(path);
-      renderEditor();
+      if (openFiles.has(path)) {
+        openFileInEditor(path, openFiles.get(path));
+      }
+      setStatus(path);
     });
 
     tabs.appendChild(tab);
   }
 
-  activateTab(path);
+  activeFile = path;
 }
 
 function activateTab(path) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   const tab = document.querySelector(`.tab[data-path="${CSS.escape(path)}"]`);
   if (tab) tab.classList.add('active');
-
-  // Also highlight in file tree
-  document.querySelectorAll('.tree-item').forEach(t => t.classList.remove('active'));
 }
 
 function closeTab(path) {
   const tab = document.querySelector(`.tab[data-path="${CSS.escape(path)}"]`);
   if (tab) tab.remove();
   openFiles.delete(path);
+  closeFileInEditor(path);
   if (activeFile === path) {
-    // Switch to the last remaining tab, if any
-    const remaining = document.querySelector('.tab');
-    if (remaining) {
-      activeFile = remaining.dataset.path;
-      activateTab(activeFile);
-    } else {
-      activeFile = null;
+    activeFile = null;
+    switchToLastTab();
+  }
+}
+
+function switchToLastTab() {
+  const remaining = document.querySelector('.tab');
+  if (remaining) {
+    const path = remaining.dataset.path;
+    activeFile = path;
+    activateTab(path);
+    if (openFiles.has(path)) {
+      openFileInEditor(path, openFiles.get(path));
     }
-    renderEditor();
+    setStatus(path);
+  } else {
+    setStatus('Connected');
   }
 }
 
@@ -252,44 +271,11 @@ function removeTab(path) {
   closeTab(path);
 }
 
-// --- Editor ---
-
-function renderEditor() {
-  const container = document.getElementById('editor-container');
-  if (!activeFile || !openFiles.has(activeFile)) {
-    container.innerHTML = '';
-    return;
-  }
-
-  let textarea = container.querySelector('textarea');
-  if (!textarea) {
-    textarea = document.createElement('textarea');
-    textarea.spellcheck = false;
-    textarea.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        saveFile();
-      }
-      // Tab key inserts spaces
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        textarea.value = textarea.value.substring(0, start) + '    ' + textarea.value.substring(end);
-        textarea.selectionStart = textarea.selectionEnd = start + 4;
-      }
-    });
-    container.innerHTML = '';
-    container.appendChild(textarea);
-  }
-
-  textarea.value = openFiles.get(activeFile);
-  setStatus(activeFile);
-}
+// --- Save ---
 
 function saveFile() {
   if (!activeFile) return;
-  const content = document.querySelector('#editor-container textarea')?.value;
+  const content = getEditorContent();
   if (content == null) return;
 
   openFiles.set(activeFile, content);
@@ -318,5 +304,5 @@ function setStatus(text) {
 
 if (location.hash && location.hash.length > 1) {
   document.getElementById('session-input').value = location.hash.slice(1);
-  joinSession();
+  window.joinSession();
 }
