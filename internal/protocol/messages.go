@@ -33,6 +33,9 @@ const (
 	TypeCommentAdd     MessageType = "comment_add"
 	TypeCommentReply   MessageType = "comment_reply"
 	TypeCommentResolve MessageType = "comment_resolve"
+	TypeGuideStart     MessageType = "guide_start"
+	TypeGuideStop      MessageType = "guide_stop"
+	TypeGuideState     MessageType = "guide_state"
 
 	// Server → Browser
 	TypeParticipantList MessageType = "participant_list"
@@ -209,6 +212,24 @@ type Comment struct {
 // CommentList is broadcast to all browsers with the full comment state.
 type CommentList struct {
 	Comments []Comment `json:"comments"`
+}
+
+// GuideStart is broadcast when a user begins guiding.
+type GuideStart struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// GuideStop is broadcast when the guide stops guiding.
+type GuideStop struct{}
+
+// GuideState is broadcast by the guide with their current viewport.
+type GuideState struct {
+	File          string `json:"file"`
+	TopLine       int    `json:"top_line"`
+	CursorLine    int    `json:"cursor_line"`
+	SelectionFrom int    `json:"selection_from,omitempty"`
+	SelectionTo   int    `json:"selection_to,omitempty"`
 }
 
 // Error carries an error message.

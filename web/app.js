@@ -1,9 +1,17 @@
-import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers } from './editor.js';
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine } from './editor.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
 let activeFile = null;
 let cursorState = []; // latest cursor_state from server
+
+// Guide mode state
+let guideActive = false;     // am I the guide?
+let guideName = null;        // who is guiding (null = nobody)
+let guideColor = null;
+let following = false;       // am I following the guide?
+let lastGuideState = null;   // latest guide viewport
+let suppressBreakAway = false; // prevent breaking away during programmatic scrolls
 let sessionId = null;
 let userName = null;
 let myColor = null;
@@ -67,7 +75,7 @@ window.joinSession = function() {
     editorView = initEditor(container, saveFile);
     setOnSave(saveFile);
 
-    // Send cursor updates debounced
+    // Send cursor updates debounced + guide state
     let cursorTimer = null;
     setOnCursorChange(() => {
       clearTimeout(cursorTimer);
@@ -76,8 +84,21 @@ window.joinSession = function() {
         if (file) {
           send('cursor_update', { file, line: getCursorLine() });
         }
+        broadcastGuideState();
       }, 50);
+
+      // Break away from following when user interacts manually
+      if (following && !guideActive && !suppressBreakAway) {
+        following = false;
+        updateGuideUI();
+      }
     });
+
+    // Also broadcast guide state on scroll (CodeMirror's scroller)
+    const scroller = document.querySelector('.cm-scroller');
+    if (scroller) {
+      scroller.addEventListener('scroll', () => broadcastGuideState(), { passive: true });
+    }
   };
 
   ws.onclose = () => {
@@ -136,6 +157,11 @@ function handleMessage(envelope) {
         scrollToLine(pendingScroll.line);
         pendingScroll = null;
       }
+      // Handle pending guide state
+      if (pendingGuideState && pendingGuideState.file === payload.path) {
+        applyGuideState(pendingGuideState);
+        pendingGuideState = null;
+      }
       break;
     }
     case 'file_changed': {
@@ -163,6 +189,15 @@ function handleMessage(envelope) {
       break;
     case 'comment_list':
       handleCommentList(payload.comments || []);
+      break;
+    case 'guide_start':
+      handleGuideStart(payload);
+      break;
+    case 'guide_stop':
+      handleGuideStop();
+      break;
+    case 'guide_state':
+      handleGuideState(payload);
       break;
   }
 }
@@ -407,6 +442,7 @@ function addTab(path) {
       }
       setStatus(path);
       refreshCommentGutter();
+      broadcastGuideState();
     });
 
     tabs.appendChild(tab);
@@ -724,6 +760,162 @@ function showToast(comment) {
   });
   container.appendChild(toast);
   setTimeout(() => toast.remove(), 5000);
+}
+
+// --- Guide mode ---
+
+window.toggleGuide = function() {
+  if (guideActive) {
+    // Stop guiding
+    guideActive = false;
+    guideName = null;
+    guideColor = null;
+    lastGuideState = null;
+    send('guide_stop', {});
+    updateGuideUI();
+  } else {
+    // Start guiding
+    guideActive = true;
+    send('guide_start', { name: userName, color: myColor });
+    updateGuideUI();
+    broadcastGuideState();
+  }
+};
+
+window.toggleFollow = function() {
+  if (!guideName || guideName === userName) return;
+  following = !following;
+  updateGuideUI();
+  if (following && lastGuideState) {
+    applyGuideState(lastGuideState);
+  }
+};
+
+function handleGuideStart(payload) {
+  guideName = payload.name;
+  guideColor = payload.color;
+  // Auto-follow if someone else starts guiding (not yourself)
+  if (guideName !== userName) {
+    following = true;
+  }
+  updateGuideUI();
+}
+
+function handleGuideStop() {
+  // Don't reset our own guideActive — that's handled by toggleGuide
+  if (guideName === userName) return;
+  guideName = null;
+  guideColor = null;
+  following = false;
+  lastGuideState = null;
+  setGuideHighlight(null, null, null);
+  setGuideCursorLine(null, null);
+  updateGuideUI();
+}
+
+function handleGuideState(state) {
+  lastGuideState = state;
+  if (following && guideName !== userName) {
+    applyGuideState(state);
+  }
+}
+
+function applyGuideState(state) {
+  suppressBreakAway = true;
+  setTimeout(() => { suppressBreakAway = false; }, 200);
+
+  // Open the file if needed
+  if (getCurrentPath() !== state.file) {
+    if (openFiles.has(state.file)) {
+      activeFile = state.file;
+      addTab(state.file);
+      openFileInEditor(state.file, openFiles.get(state.file));
+      activateTab(state.file);
+      setStatus(state.file);
+    } else {
+      // Request the file, then apply guide state after it loads
+      pendingGuideState = state;
+      send('open_file', { path: state.file });
+      return;
+    }
+  }
+
+  // Scroll to the guide's top line and apply highlights
+  // Use requestAnimationFrame to ensure the editor has settled after file switch
+  requestAnimationFrame(() => {
+    if (state.top_line) {
+      scrollToTopLine(state.top_line);
+    }
+
+    // Show guide's cursor line
+    if (state.cursor_line) {
+      setGuideCursorLine(state.cursor_line, guideColor);
+    } else {
+      setGuideCursorLine(null, null);
+    }
+
+    // Show guide's selection highlight
+    if (state.selection_from && state.selection_to) {
+      setGuideHighlight(state.selection_from, state.selection_to, guideColor);
+    } else {
+      setGuideHighlight(null, null, null);
+    }
+  });
+}
+
+let pendingGuideState = null;
+
+// Broadcast guide state — called when the guide scrolls, selects, or switches files
+let guideStateRaf = null;
+function broadcastGuideState() {
+  if (!guideActive) return;
+  cancelAnimationFrame(guideStateRaf);
+  guideStateRaf = requestAnimationFrame(() => {
+    const file = getCurrentPath();
+    if (!file) return;
+    const sel = getSelectionLines();
+    send('guide_state', {
+      file,
+      top_line: getTopVisibleLine(),
+      cursor_line: getCursorLine(),
+      selection_from: sel ? sel.from : 0,
+      selection_to: sel ? sel.to : 0,
+    });
+  });
+}
+
+function updateGuideUI() {
+  const btn = document.getElementById('guide-btn');
+  const banner = document.getElementById('guide-banner');
+  const bannerText = document.getElementById('guide-banner-text');
+  const followBtn = document.getElementById('follow-btn');
+
+  if (!btn || !banner || !bannerText || !followBtn) return;
+
+  if (guideActive) {
+    btn.textContent = 'Stop Guiding';
+    btn.classList.add('active');
+    banner.style.display = 'flex';
+    bannerText.textContent = 'You are guiding this session';
+    banner.style.background = myColor + '22';
+    banner.style.borderColor = myColor;
+    followBtn.style.display = 'none';
+  } else if (guideName && guideName !== userName) {
+    btn.style.display = 'none';
+    banner.style.display = 'flex';
+    bannerText.innerHTML = `<span style="color:${guideColor}">${guideName}</span> is guiding`;
+    banner.style.background = guideColor + '22';
+    banner.style.borderColor = guideColor;
+    followBtn.style.display = '';
+    followBtn.textContent = following ? 'Unfollow' : 'Follow';
+    followBtn.classList.toggle('active', following);
+  } else {
+    btn.textContent = 'Guide';
+    btn.classList.remove('active');
+    btn.style.display = '';
+    banner.style.display = 'none';
+    followBtn.style.display = 'none';
+  }
 }
 
 // --- Auto-join from URL hash ---

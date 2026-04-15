@@ -165,6 +165,8 @@ func (cs *commentStore) reanchorFile(relPath string) bool {
 	}
 	return changed
 }
+// New stuff...
+
 
 // findAnchor tries to locate the anchor text in the file.
 // Returns (new line number 1-based, orphaned bool).

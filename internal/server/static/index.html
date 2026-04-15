@@ -394,6 +394,48 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
+    /* Guide mode */
+    #guide-btn {
+      background: #313244;
+      border: 1px solid #45475a;
+      color: #a6adc8;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    #guide-btn:hover { border-color: #89b4fa; color: #cdd6f4; }
+    #guide-btn.active {
+      background: #89b4fa;
+      color: #1e1e2e;
+      border-color: #89b4fa;
+    }
+    #guide-banner {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 4px 12px;
+      font-size: 12px;
+      border-bottom: 1px solid;
+      flex-shrink: 0;
+    }
+    #follow-btn {
+      background: #313244;
+      border: 1px solid #45475a;
+      color: #a6adc8;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    #follow-btn:hover { border-color: #89b4fa; color: #cdd6f4; }
+    #follow-btn.active {
+      background: #a6e3a1;
+      color: #1e1e2e;
+      border-color: #a6e3a1;
+    }
+
     /* Status bar */
     #status {
       height: 22px;
@@ -443,6 +485,7 @@
         <span class="session-id" id="session-id-display"></span>
       </div>
       <div class="participants" id="participant-list"></div>
+      <button id="guide-btn" onclick="toggleGuide()">Guide</button>
     </div>
     <div id="workspace">
       <div id="sidebar">
@@ -450,6 +493,7 @@
         <div id="file-tree"></div>
       </div>
       <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;">
+        <div id="guide-banner"><span id="guide-banner-text"></span><button id="follow-btn" onclick="toggleFollow()">Follow</button></div>
         <div id="tabs"></div>
         <div id="editor-container"></div>
         <button id="comment-toggle-btn" onclick="toggleCommentSidebar()">Comments</button>

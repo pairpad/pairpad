@@ -1,4 +1,4 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, highlightActiveLine, rectangularSelection, crosshairCursor, gutter, GutterMarker } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, highlightActiveLine, rectangularSelection, crosshairCursor, gutter, GutterMarker, Decoration } from '@codemirror/view';
 import { EditorState, StateField, StateEffect, RangeSet } from '@codemirror/state';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
@@ -138,6 +138,8 @@ function baseExtensions(onSave) {
   return [
     commentMarkerField,
     commentGutter,
+    guideHighlightField,
+    guideCursorField,
     lineNumbers(),
     highlightActiveLineGutter(),
     highlightSpecialChars(),
@@ -282,4 +284,113 @@ export function getCursorLine() {
   if (!view) return 1;
   const pos = view.state.selection.main.head;
   return view.state.doc.lineAt(pos).number;
+}
+
+// --- Guide mode support ---
+
+// Get the top visible line (1-based).
+export function getTopVisibleLine() {
+  if (!view) return 1;
+  const rect = view.dom.getBoundingClientRect();
+  const pos = view.posAtCoords({ x: rect.left, y: rect.top + 5 });
+  if (pos == null) return 1;
+  return view.state.doc.lineAt(pos).number;
+}
+
+// Get the current selection range as line numbers (1-based). Returns null if no selection.
+export function getSelectionLines() {
+  if (!view) return null;
+  const sel = view.state.selection.main;
+  if (sel.from === sel.to) return null;
+  return {
+    from: view.state.doc.lineAt(sel.from).number,
+    to: view.state.doc.lineAt(sel.to).number,
+  };
+}
+
+// Scroll to make a specific line appear at the top of the viewport.
+export function scrollToTopLine(line) {
+  if (!view) return;
+  const clampedLine = Math.max(1, Math.min(line, view.state.doc.lines));
+  const lineInfo = view.state.doc.line(clampedLine);
+  view.dispatch({
+    effects: EditorView.scrollIntoView(lineInfo.from, { y: 'start' }),
+  });
+}
+
+// Guide highlight decoration
+const guideHighlightEffect = StateEffect.define();
+
+const guideHighlightField = StateField.define({
+  create() { return Decoration.none; },
+  update(deco, tr) {
+    for (const e of tr.effects) {
+      if (e.is(guideHighlightEffect)) {
+        return e.value;
+      }
+    }
+    return deco.map(tr.changes);
+  },
+  provide: f => EditorView.decorations.from(f),
+});
+
+// Guide cursor line decoration
+const guideCursorEffect = StateEffect.define();
+
+const guideCursorField = StateField.define({
+  create() { return Decoration.none; },
+  update(deco, tr) {
+    for (const e of tr.effects) {
+      if (e.is(guideCursorEffect)) {
+        return e.value;
+      }
+    }
+    return deco.map(tr.changes);
+  },
+  provide: f => EditorView.decorations.from(f),
+});
+
+// Show or clear the guide's cursor line indicator.
+export function setGuideCursorLine(line, color) {
+  if (!view) return;
+
+  if (!line) {
+    view.dispatch({ effects: guideCursorEffect.of(Decoration.none) });
+    return;
+  }
+
+  const clampedLine = Math.max(1, Math.min(line, view.state.doc.lines));
+  const lineInfo = view.state.doc.line(clampedLine);
+
+  const deco = Decoration.line({
+    class: 'cm-guide-cursor-line',
+    attributes: { style: `background: ${color}15; border-left: 2px solid ${color};` },
+  });
+
+  view.dispatch({
+    effects: guideCursorEffect.of(Decoration.set([deco.range(lineInfo.from)])),
+  });
+}
+
+// Set or clear the guide highlight range (line numbers, 1-based).
+export function setGuideHighlight(fromLine, toLine, color) {
+  if (!view) return;
+
+  if (!fromLine || !toLine) {
+    // Clear highlight
+    view.dispatch({ effects: guideHighlightEffect.of(Decoration.none) });
+    return;
+  }
+
+  const from = view.state.doc.line(Math.max(1, Math.min(fromLine, view.state.doc.lines))).from;
+  const to = view.state.doc.line(Math.max(1, Math.min(toLine, view.state.doc.lines))).to;
+
+  const mark = Decoration.mark({
+    class: 'cm-guide-highlight',
+    attributes: { style: `background: ${color}22; outline: 1px solid ${color}44;` },
+  });
+
+  view.dispatch({
+    effects: guideHighlightEffect.of(Decoration.set([mark.range(from, to)])),
+  });
 }

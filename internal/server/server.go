@@ -321,6 +321,29 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			// Relay directly to daemon
 			sess.daemon.Write(r.Context(), websocket.MessageText, data)
 
+		case protocol.TypeGuideStart:
+			// Inject guide's name and color, broadcast to all browsers
+			var msg protocol.GuideStart
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			p := sess.getParticipantByConn(conn)
+			if p == nil {
+				continue
+			}
+			msg.Name = p.name
+			msg.Color = p.color
+			relayData, err := protocol.Encode(protocol.TypeGuideStart, msg)
+			if err == nil {
+				sess.broadcastToBrowsers(r.Context(), relayData)
+			}
+
+		case protocol.TypeGuideStop:
+			sess.broadcastToBrowsers(r.Context(), data)
+
+		case protocol.TypeGuideState:
+			sess.broadcastToBrowsers(r.Context(), data)
+
 		default:
 			log.Printf("unhandled browser message: %s", env.Type)
 		}
