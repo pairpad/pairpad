@@ -24,9 +24,11 @@ var participantColors = []string{
 
 // participant tracks a connected browser user.
 type participant struct {
-	conn  *websocket.Conn
-	name  string
-	color string
+	conn       *websocket.Conn
+	name       string
+	color      string
+	cursorFile string
+	cursorLine int
 }
 
 // session represents an active pairing session with a connected daemon
@@ -90,6 +92,33 @@ func (s *session) getParticipantList() []protocol.Participant {
 		})
 	}
 	return list
+}
+
+func (s *session) updateCursor(conn *websocket.Conn, file string, line int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p, ok := s.participants[conn]; ok {
+		p.cursorFile = file
+		p.cursorLine = line
+	}
+}
+
+func (s *session) getCursorState() []protocol.CursorInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cursors := make([]protocol.CursorInfo, 0, len(s.participants))
+	for _, p := range s.participants {
+		if p.name == "" || p.cursorFile == "" {
+			continue
+		}
+		cursors = append(cursors, protocol.CursorInfo{
+			Name:  p.name,
+			Color: p.color,
+			File:  p.cursorFile,
+			Line:  p.cursorLine,
+		})
+	}
+	return cursors
 }
 
 func (s *session) trackFileRequest(path string, conn *websocket.Conn) {

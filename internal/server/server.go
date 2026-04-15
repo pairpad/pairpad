@@ -183,6 +183,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		sess.removeBrowser(conn)
 		s.broadcastParticipants(r.Context(), sess)
+		s.broadcastCursorState(r.Context(), sess)
 		log.Printf("browser left session %s", sessionID)
 	}()
 
@@ -265,9 +266,27 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				sess.daemon.Write(r.Context(), websocket.MessageText, writeData)
 			}
 
+		case protocol.TypeCursorUpdate:
+			var msg protocol.CursorUpdate
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			sess.updateCursor(conn, msg.File, msg.Line)
+			s.broadcastCursorState(r.Context(), sess)
+
 		default:
 			log.Printf("unhandled browser message: %s", env.Type)
 		}
+	}
+}
+
+func (s *Server) broadcastCursorState(ctx context.Context, sess *session) {
+	cursors := sess.getCursorState()
+	data, err := protocol.Encode(protocol.TypeCursorState, protocol.CursorState{
+		Cursors: cursors,
+	})
+	if err == nil {
+		sess.broadcastToBrowsers(ctx, data)
 	}
 }
 

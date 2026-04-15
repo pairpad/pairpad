@@ -1,8 +1,9 @@
-import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave } from './editor.js';
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine } from './editor.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
 let activeFile = null;
+let cursorState = []; // latest cursor_state from server
 let sessionId = null;
 let userName = null;
 let myColor = null;
@@ -65,6 +66,18 @@ window.joinSession = function() {
     const container = document.getElementById('editor-container');
     editorView = initEditor(container, saveFile);
     setOnSave(saveFile);
+
+    // Send cursor updates debounced
+    let cursorTimer = null;
+    setOnCursorChange(() => {
+      clearTimeout(cursorTimer);
+      cursorTimer = setTimeout(() => {
+        const file = getCurrentPath();
+        if (file) {
+          send('cursor_update', { file, line: getCursorLine() });
+        }
+      }, 50);
+    });
   };
 
   ws.onclose = () => {
@@ -118,6 +131,11 @@ function handleMessage(envelope) {
       openFileInEditor(payload.path, content);
       activateTab(payload.path);
       setStatus(payload.path);
+      // Handle pending scroll from jumpToParticipant
+      if (pendingScroll && pendingScroll.file === payload.path) {
+        scrollToLine(pendingScroll.line);
+        pendingScroll = null;
+      }
       break;
     }
     case 'file_changed': {
@@ -138,6 +156,11 @@ function handleMessage(envelope) {
     case 'participant_list':
       renderParticipants(payload.participants);
       break;
+    case 'cursor_state':
+      cursorState = payload.cursors || [];
+      renderFileTreePresence();
+      renderParticipantLocations();
+      break;
   }
 }
 
@@ -148,13 +171,17 @@ function decodeContent(b64) {
 
 // --- Participants ---
 
-function renderParticipants(participants) {
+let participants = [];
+
+function renderParticipants(list) {
+  participants = list;
   const container = document.getElementById('participant-list');
   container.innerHTML = '';
 
   for (const p of participants) {
     const badge = document.createElement('div');
     badge.className = 'participant-badge';
+    badge.dataset.name = p.name;
 
     const dot = document.createElement('span');
     dot.className = 'participant-dot';
@@ -167,12 +194,90 @@ function renderParticipants(participants) {
       name.textContent = `${p.name} (you)`;
     } else {
       name.textContent = p.name;
+      // Clickable — jump to their cursor location
+      badge.style.cursor = 'pointer';
+      badge.title = 'Click to jump to their location';
+      badge.addEventListener('click', () => jumpToParticipant(p.name));
     }
 
     badge.appendChild(dot);
     badge.appendChild(name);
+
+    // Show current file as a subtitle
+    const fileLabel = document.createElement('span');
+    fileLabel.className = 'participant-file';
+    fileLabel.dataset.name = p.name;
+    badge.appendChild(fileLabel);
+
     container.appendChild(badge);
   }
+
+  // Update file labels from cursor state
+  renderParticipantLocations();
+}
+
+function renderParticipantLocations() {
+  for (const cursor of cursorState) {
+    const label = document.querySelector(`.participant-file[data-name="${CSS.escape(cursor.name)}"]`);
+    if (label && cursor.name !== userName) {
+      label.textContent = cursor.file.split('/').pop();
+    }
+  }
+}
+
+function jumpToParticipant(name) {
+  const cursor = cursorState.find(c => c.name === name);
+  if (!cursor) return;
+
+  // Open the file if not already open
+  activeFile = cursor.file;
+  if (openFiles.has(cursor.file)) {
+    addTab(cursor.file);
+    openFileInEditor(cursor.file, openFiles.get(cursor.file));
+    activateTab(cursor.file);
+    scrollToLine(cursor.line);
+    setStatus(cursor.file);
+  } else {
+    // Request the file, then scroll after it loads
+    pendingScroll = { file: cursor.file, line: cursor.line };
+    send('open_file', { path: cursor.file });
+  }
+}
+
+let pendingScroll = null;
+
+// File tree presence — show colored dots next to files where users have cursors
+function renderFileTreePresence() {
+  // Clear existing presence dots
+  document.querySelectorAll('.tree-presence').forEach(el => el.remove());
+
+  for (const cursor of cursorState) {
+    if (cursor.name === userName) continue;
+
+    // Find the file tree item for this path
+    const items = document.querySelectorAll('.tree-item.tree-file');
+    for (const item of items) {
+      const label = item.querySelector('.tree-label');
+      if (!label) continue;
+
+      // Match against the full path by checking the item text and its depth
+      // We stored the path in the click handler closure, so we need to check label text
+      // against the last component of the cursor file path
+      if (matchesTreeItem(item, cursor.file)) {
+        const dot = document.createElement('span');
+        dot.className = 'tree-presence';
+        dot.style.background = cursor.color;
+        item.appendChild(dot);
+        break;
+      }
+    }
+  }
+}
+
+function matchesTreeItem(item, filePath) {
+  // Reconstruct path from the tree item by walking up through siblings/parents
+  // Simpler approach: store path as data attribute
+  return item.dataset.filePath === filePath;
 }
 
 // --- File tree ---
@@ -242,6 +347,7 @@ function renderTreeNode(node, container, depth) {
       icon.textContent = '\u2847';
       item.appendChild(icon);
       item.appendChild(label);
+      item.dataset.filePath = entry.path;
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         openFile(entry.path);

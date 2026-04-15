@@ -106,6 +106,11 @@ function baseExtensions(onSave) {
       '&': { height: '100%' },
       '.cm-scroller': { overflow: 'auto' },
     }),
+    EditorView.updateListener.of((update) => {
+      if (update.selectionSet || update.docChanged) {
+        onCursorCallback();
+      }
+    }),
   ];
 }
 
@@ -190,8 +195,31 @@ export function getCurrentPath() {
   return currentPath;
 }
 
-// Callback holder — set by the app
+// Callback holders — set by the app
 let onSaveCallback = () => {};
 export function setOnSave(fn) {
   onSaveCallback = fn;
+}
+
+let onCursorCallback = () => {};
+export function setOnCursorChange(fn) {
+  onCursorCallback = fn;
+}
+
+// Scroll the editor to a specific line number (1-based).
+export function scrollToLine(line) {
+  if (!view) return;
+  const lineInfo = view.state.doc.line(Math.min(line, view.state.doc.lines));
+  view.dispatch({
+    selection: { anchor: lineInfo.from },
+    effects: EditorView.scrollIntoView(lineInfo.from, { y: 'center' }),
+  });
+  view.focus();
+}
+
+// Get the current cursor line (1-based).
+export function getCursorLine() {
+  if (!view) return 1;
+  const pos = view.state.selection.main.head;
+  return view.state.doc.lineAt(pos).number;
 }

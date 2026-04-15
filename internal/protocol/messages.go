@@ -24,13 +24,15 @@ const (
 	TypeCreateFile  MessageType = "create_file"
 
 	// Browser → Server
-	TypeIdentify  MessageType = "identify"
-	TypeOpenFile  MessageType = "open_file"
-	TypeCloseFile MessageType = "close_file"
-	TypeSaveFile  MessageType = "save_file"
+	TypeIdentify     MessageType = "identify"
+	TypeOpenFile     MessageType = "open_file"
+	TypeCloseFile    MessageType = "close_file"
+	TypeSaveFile     MessageType = "save_file"
+	TypeCursorUpdate MessageType = "cursor_update"
 
 	// Server → Browser
 	TypeParticipantList MessageType = "participant_list"
+	TypeCursorState     MessageType = "cursor_state"
 
 	// Both directions
 	TypePing  MessageType = "ping"
@@ -138,6 +140,25 @@ type Participant struct {
 // ParticipantList is broadcast to all browsers when someone joins or leaves.
 type ParticipantList struct {
 	Participants []Participant `json:"participants"`
+}
+
+// CursorUpdate is sent by a browser when its cursor position changes.
+type CursorUpdate struct {
+	File string `json:"file"`
+	Line int    `json:"line"`
+}
+
+// CursorInfo describes one participant's cursor position.
+type CursorInfo struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+	File  string `json:"file"`
+	Line  int    `json:"line"`
+}
+
+// CursorState is broadcast to all browsers with everyone's cursor positions.
+type CursorState struct {
+	Cursors []CursorInfo `json:"cursors"`
 }
 
 // Error carries an error message.
