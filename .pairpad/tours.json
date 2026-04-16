@@ -7,95 +7,80 @@
       "steps": [
         {
           "file": "cmd/pairpad/main.go",
-          "line": 1,
+          "line": 10,
+          "line_end": 27,
           "title": "Daemon entry point",
-          "description": "The daemon CLI starts here. It supports 'serve', 'login', and 'version' commands. The 'serve' command is the main one — it connects to the server and exposes the local project.",
-          "anchor_text": "package main",
-          "anchor_context": [
-            "package main",
-            "",
-            "import ("
-          ]
+          "description": "The daemon CLI starts here. It supports 'serve', 'login', and 'version' commands. The 'serve' command is the main one — it connects to the server and exposes the local project."
         },
         {
           "file": "cmd/server/main.go",
-          "line": 1,
+          "line": 10,
+          "line_end": 27,
           "title": "Server entry point",
-          "description": "The server is a stateless WebSocket relay. It accepts connections from daemons and browsers, and relays messages between them. Config comes from environment variables.",
-          "anchor_text": "package main",
-          "anchor_context": [
-            "package main",
-            "",
-            "import ("
-          ]
+          "description": "The server is a stateless WebSocket relay. It accepts connections from daemons and browsers, and relays messages between them. Config comes from environment variables."
         },
         {
           "file": "internal/protocol/messages.go",
           "line": 11,
+          "line_end": 55,
           "title": "Protocol messages",
-          "description": "All WebSocket messages are typed envelopes. This file defines every message type shared between daemon, server, and browser. Messages are JSON-encoded with a 'type' field for routing.",
-          "anchor_text": "const (",
-          "anchor_context": [
-            "type MessageType string",
-            "",
-            "const (",
-            "\t// Daemon → Server",
-            "\tTypeFileTree    MessageType = \"file_tree\""
-          ]
+          "description": "All WebSocket messages are typed envelopes. This file defines every message type shared between daemon, server, and browser. Messages are JSON-encoded with a 'type' field for routing."
         },
         {
           "file": "internal/daemon/daemon.go",
-          "line": 55,
+          "line": 60,
+          "line_end": 106,
           "title": "Daemon connection loop",
-          "description": "The daemon connects to the server via WebSocket, sends the file tree, starts the filesystem watcher, and enters a loop handling server messages and local file events.",
-          "anchor_text": "\t}, nil",
-          "anchor_context": [
-            "\t\tcomments: comments,",
-            "\t\ttours:    tours,",
-            "\t}, nil",
-            "}",
-            ""
-          ]
+          "description": "The Run() method connects to the server via WebSocket, sends the file tree, starts the filesystem watcher, and enters a loop handling server messages and local file events."
+        },
+        {
+          "file": "internal/daemon/daemon.go",
+          "line": 135,
+          "line_end": 264,
+          "title": "Daemon message handler",
+          "description": "handleServerMessage routes incoming messages from the server. File requests, comments, tours, and guide mode are all handled here. The daemon reads/writes local files and broadcasts results back through the server."
         },
         {
           "file": "internal/server/server.go",
-          "line": 77,
-          "title": "Daemon WebSocket handler",
-          "description": "When a daemon connects, the server creates a session and relays messages between the daemon and any browsers that join. The server never stores code — it's a pure relay.",
-          "anchor_text": "\tconn, err := websocket.Accept(w, r, \u0026websocket.AcceptOptions{",
-          "anchor_context": [
-            "",
-            "func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {",
-            "\tconn, err := websocket.Accept(w, r, \u0026websocket.AcceptOptions{",
-            "\t\tOriginPatterns: []string{\"*\"},",
-            "\t})"
-          ]
+          "line": 76,
+          "line_end": 158,
+          "title": "Server daemon handler",
+          "description": "When a daemon connects, the server creates a session and relays messages between the daemon and any browsers that join. File content, comments, tours, and cursor state flow through here. The server never stores code — it's a pure relay."
+        },
+        {
+          "file": "internal/server/server.go",
+          "line": 160,
+          "line_end": 375,
+          "title": "Server browser handler",
+          "description": "Browser connections are authenticated with a session ID. The server routes browser messages (file opens, saves, comments, guide mode, tours) to the daemon. Guide and follow messages are broadcast to all browsers."
         },
         {
           "file": "internal/daemon/comments.go",
-          "line": 27,
+          "line": 19,
+          "line_end": 42,
           "title": "Comment storage",
-          "description": "Comments are stored locally in .pairpad/comments.json. The daemon owns all comment state — the server only relays. Comments use anchor text for re-anchoring when code changes.",
-          "anchor_text": "\tcs := \u0026commentStore{projectDir: projectDir}",
-          "anchor_context": [
-            "",
-            "func newCommentStore(projectDir string) (*commentStore, error) {",
-            "\tcs := \u0026commentStore{projectDir: projectDir}",
-            "",
-            "\t// Ensure .pairpad directory exists"
-          ]
+          "description": "Comments are stored locally in .pairpad/comments.json. The commentStore manages persistence, anchor population, and re-anchoring. Comments never leave the developer's machine — the server only relays them during live sessions."
+        },
+        {
+          "file": "internal/daemon/tours.go",
+          "line": 15,
+          "line_end": 28,
+          "title": "Tour storage",
+          "description": "Tours are stored in .pairpad/tours.json with a runtime copy for re-anchored line numbers. The on-disk version keeps authored line numbers; the runtime version adjusts them based on current file content."
+        },
+        {
+          "file": "web/editor.js",
+          "line": 1,
+          "line_end": 8,
+          "title": "Editor module",
+          "description": "The browser IDE is built with CodeMirror 6. This module handles the editor instance, syntax highlighting, gutter markers, guide highlights, peer selections, and tour step markers."
         },
         {
           "file": "web/app.js",
           "line": 1,
+          "line_end": 20,
           "title": "Frontend entry point",
-          "description": "The browser IDE is built with CodeMirror 6 and bundled with esbuild. This file handles WebSocket connection, file tree, tabs, comments, guide mode, and tour mode.",
-          "anchor_text": "import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers } from './editor.js';",
-          "anchor_context": [
-            "import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers } from './editor.js';",
-            "",
-            "let ws = null;"
-          ]
+          "description": "The main frontend module handles WebSocket connection, file tree, tabs, comments, guide mode, tour mode, and all user interactions. Bundled with esbuild into the embedded static assets."
         }
       ]
     },
@@ -107,70 +92,37 @@
         {
           "file": "internal/protocol/messages.go",
           "line": 11,
+          "line_end": 55,
           "title": "1. Define the message type",
-          "description": "Add a new MessageType constant here. Follow the pattern: Browser → Server messages, Server → Daemon messages, etc. Then add the corresponding struct at the bottom of the file.",
-          "anchor_text": "const (",
-          "anchor_context": [
-            "type MessageType string",
-            "",
-            "const (",
-            "\t// Daemon → Server",
-            "\tTypeFileTree    MessageType = \"file_tree\""
-          ]
+          "description": "Add a new MessageType constant here. Follow the pattern: Browser → Server messages, Server → Daemon messages, etc. Then add the corresponding struct at the bottom of the file."
         },
         {
           "file": "internal/server/server.go",
-          "line": 245,
+          "line": 257,
+          "line_end": 375,
           "title": "2. Handle it in the server",
-          "description": "The server's browser message loop is here. For most features, the server just relays to the daemon or broadcasts to browsers. Add a case for your new message type.",
-          "anchor_text": "\tfor {",
-          "anchor_context": [
-            "",
-            "\t// Read messages from browser and relay to daemon",
-            "\tfor {",
-            "\t\t_, data, err := conn.Read(r.Context())",
-            "\t\tif err != nil {"
-          ]
+          "description": "The server's browser message loop is here. For most features, the server just relays to the daemon or broadcasts to browsers. Add a case for your new message type in this switch statement."
         },
         {
           "file": "internal/daemon/daemon.go",
-          "line": 127,
+          "line": 135,
+          "line_end": 264,
           "title": "3. Handle it in the daemon",
-          "description": "If your feature involves the filesystem or local storage (like comments/tours), handle the message here. The daemon reads/writes local files and broadcasts results back through the server.",
-          "anchor_text": "\t\t}",
-          "anchor_context": [
-            "\t\t\tlog.Printf(\"invalid message: %v\", err)",
-            "\t\t\tcontinue",
-            "\t\t}",
-            "",
-            "\t\tif err := d.handleServerMessage(ctx, conn, env); err != nil {"
-          ]
+          "description": "If your feature involves the filesystem or local storage (like comments/tours), handle the message here. The daemon reads/writes local files and broadcasts results back through the server."
         },
         {
           "file": "web/app.js",
-          "line": 106,
+          "line": 152,
+          "line_end": 230,
           "title": "4. Handle it in the frontend",
-          "description": "The message handler switch statement is here. Parse the payload and call your rendering function. Keep the handler small — put the logic in a separate function below.",
-          "anchor_text": "    // Also broadcast guide state on scroll (CodeMirror's scroller)",
-          "anchor_context": [
-            "    });",
-            "",
-            "    // Also broadcast guide state on scroll (CodeMirror's scroller)",
-            "    const scroller = document.querySelector('.cm-scroller');",
-            "    if (scroller) {"
-          ]
+          "description": "The handleMessage switch statement routes incoming messages. Parse the payload and call your rendering function. Keep the handler small — put the logic in a separate function below."
         },
         {
           "file": "Makefile",
           "line": 1,
+          "line_end": 20,
           "title": "5. Build and test",
-          "description": "'make build' compiles everything: frontend (esbuild), server, and daemon. Run 'make server' and 'make daemon' in separate terminals, open the browser, and test your feature.",
-          "anchor_text": ".PHONY: build server daemon clean frontend",
-          "anchor_context": [
-            ".PHONY: build server daemon clean frontend",
-            "",
-            "build: frontend bin/server bin/pairpad"
-          ]
+          "description": "'make build' compiles everything: frontend (esbuild), server, and daemon. Run 'make server' and 'make daemon' in separate terminals, open the browser, and test your feature."
         }
       ]
     },
@@ -182,140 +134,72 @@
         {
           "file": "go.mod",
           "line": 5,
+          "line_end": 10,
           "title": "Minimal dependencies",
-          "description": "Pairpad has exactly 2 direct dependencies: coder/websocket (WebSocket protocol) and fsnotify (filesystem watcher). Plus one transitive dependency (golang.org/x/sys). The entire dependency tree is auditable in minutes. Compare this to Electron apps with hundreds of npm packages.",
-          "anchor_text": "require (",
-          "anchor_context": [
-            "go 1.25.9",
-            "",
-            "require (",
-            "\tgithub.com/coder/websocket v1.8.14",
-            "\tgithub.com/fsnotify/fsnotify v1.9.0"
-          ]
+          "description": "Pairpad has exactly 2 direct dependencies: coder/websocket (WebSocket protocol) and fsnotify (filesystem watcher). Plus one transitive dependency (golang.org/x/sys). The entire dependency tree is auditable in minutes. Compare this to Electron apps with hundreds of npm packages."
         },
         {
           "file": "internal/daemon/ignore.go",
           "line": 10,
+          "line_end": 27,
           "title": "Hard deny list — files never served",
-          "description": "These patterns are always denied regardless of configuration. .env files, SSH keys, GPG keys, PEM/key files, .git directory, and node_modules are never exposed over the WebSocket connection. This list cannot be overridden by .gitignore or .pairpadignore.",
-          "anchor_text": "// hardDenyPatterns are never served regardless of configuration.",
-          "anchor_context": [
-            ")",
-            "",
-            "// hardDenyPatterns are never served regardless of configuration.",
-            "var hardDenyPatterns = []string{",
-            "\t\".env\","
-          ]
+          "description": "These patterns are always denied regardless of configuration. .env files, SSH keys, GPG keys, PEM/key files, .git directory, and node_modules are never exposed over the WebSocket connection. This list cannot be overridden by .gitignore or .pairpadignore."
         },
         {
           "file": "internal/daemon/ignore.go",
-          "line": 61,
+          "line": 60,
+          "line_end": 70,
           "title": "Path traversal prevention",
-          "description": "Any relative path containing '..' is rejected. Combined with filepath.Join() for all file operations (which normalizes paths), this prevents directory traversal attacks. A browser client cannot request files outside the project directory.",
-          "anchor_text": "func (m *ignoreMatcher) shouldIgnore(relPath string) bool {",
-          "anchor_context": [
-            "",
-            "// shouldIgnore returns true if the given relative path matches any ignore pattern.",
-            "func (m *ignoreMatcher) shouldIgnore(relPath string) bool {",
-            "\t// Reject path traversal",
-            "\tif strings.Contains(relPath, \"..\") {"
-          ]
+          "description": "Any relative path containing '..' is rejected. Combined with filepath.Join() for all file operations (which normalizes paths), this prevents directory traversal attacks. A browser client cannot request files outside the project directory."
         },
         {
           "file": "internal/daemon/scanner.go",
           "line": 11,
+          "line_end": 15,
           "title": "File size limits",
-          "description": "Files larger than 5MB are silently skipped during tree scanning and file reads. This prevents memory exhaustion from serving large binary files or log files. The WebSocket read limit is set to 10MB on both sides.",
-          "anchor_text": "const maxFileSize = 5 * 1024 * 1024 // 5MB",
-          "anchor_context": [
-            ")",
-            "",
-            "const maxFileSize = 5 * 1024 * 1024 // 5MB",
-            "",
-            "// scanTree walks the project directory and returns a list of file entries,"
-          ]
+          "description": "Files larger than 5MB are silently skipped during tree scanning and file reads. This prevents memory exhaustion from serving large binary files or log files. The WebSocket read limit is set to 10MB on both sides."
         },
         {
           "file": "internal/protocol/codec.go",
           "line": 5,
+          "line_end": 27,
           "title": "Wire protocol — JSON envelopes",
-          "description": "All messages are JSON-encoded with a 'type' field for routing and a 'payload' field containing the typed data. The protocol is stateless and inspectable — you can read every message on the wire with standard WebSocket debugging tools. No binary protocol, no obfuscation.",
-          "anchor_text": "// Encode wraps a typed payload into an Envelope for transmission.",
-          "anchor_context": [
-            "import \"encoding/json\"",
-            "",
-            "// Encode wraps a typed payload into an Envelope for transmission.",
-            "func Encode(msgType MessageType, payload any) ([]byte, error) {",
-            "\tp, err := json.Marshal(payload)"
-          ]
+          "description": "All messages are JSON-encoded with a 'type' field for routing and a 'payload' field containing the typed data. The protocol is stateless and inspectable — you can read every message on the wire with standard WebSocket debugging tools. No binary protocol, no obfuscation."
         },
         {
           "file": "internal/server/server.go",
-          "line": 85,
+          "line": 30,
+          "line_end": 44,
           "title": "Server is a stateless relay",
-          "description": "The server never stores code, comments, or project data. It holds ephemeral session state (who's connected, cursor positions) in memory only. When the server restarts, all sessions end. Code transits the server as WebSocket messages but is never written to disk or cached. The server cannot be subpoenaed for your source code because it doesn't have it.",
-          "anchor_text": "\tconn.SetReadLimit(10 * 1024 * 1024) // 10MB",
-          "anchor_context": [
-            "\t}",
-            "\tdefer conn.CloseNow()",
-            "\tconn.SetReadLimit(10 * 1024 * 1024) // 10MB",
-            "",
-            "\tsessionID := generateID()"
-          ]
+          "description": "The Server struct holds only ephemeral session state in memory — a map of active sessions. No database, no file storage, no cache. When the server restarts, all sessions end. Code transits the server as WebSocket messages but is never written to disk. The server cannot be subpoenaed for your source code because it doesn't have it."
         },
         {
           "file": "internal/daemon/comments.go",
-          "line": 14,
+          "line": 13,
+          "line_end": 18,
           "title": "Comments stay local",
-          "description": "Comments and tours are stored in .pairpad/ inside your project directory. The daemon reads and writes them. The server only relays comment messages between the daemon and browsers during live sessions. When the session ends, the server retains nothing. Your annotations are your files on your machine.",
-          "anchor_text": "\tcommentsFile = \"comments.json\"",
-          "anchor_context": [
-            "const (",
-            "\tpairpadDir   = \".pairpad\"",
-            "\tcommentsFile = \"comments.json\"",
-            "\t// Number of context lines above and below the anchor",
-            "\tcontextRadius = 2"
-          ]
+          "description": "Comments and tours are stored in .pairpad/ inside your project directory. The daemon reads and writes them. The server only relays comment messages between the daemon and browsers during live sessions. When the session ends, the server retains nothing. Your annotations are your files on your machine."
         },
         {
           "file": "internal/server/session.go",
           "line": 166,
+          "line_end": 186,
           "title": "Write serialization — no race conditions",
-          "description": "All WebSocket writes to the daemon are serialized through writeToDaemon() with mutex protection. Browser broadcasts copy the connection list under a read lock before iterating. This prevents concurrent write corruption and map iteration crashes.",
-          "anchor_text": "// broadcastToBrowsers sends a message to all connected browser clients.",
-          "anchor_context": [
-            "}",
-            "",
-            "// broadcastToBrowsers sends a message to all connected browser clients.",
-            "func (s *session) broadcastToBrowsers(ctx context.Context, data []byte) {",
-            "\ts.mu.RLock()"
-          ]
+          "description": "All WebSocket writes to the daemon are serialized through writeToDaemon() with mutex protection. Browser broadcasts copy the connection list under a read lock before iterating. This prevents concurrent write corruption and map iteration crashes."
         },
         {
           "file": "internal/daemon/daemon.go",
-          "line": 55,
+          "line": 60,
+          "line_end": 72,
           "title": "Daemon connects outbound only",
-          "description": "The daemon initiates an outbound WebSocket connection to the server. No inbound ports are opened. No port forwarding, no firewall rules, no NAT traversal. The daemon works behind corporate firewalls because it's just an HTTPS connection going out.",
-          "anchor_text": "\t}, nil",
-          "anchor_context": [
-            "\t\tcomments: comments,",
-            "\t\ttours:    tours,",
-            "\t}, nil",
-            "}",
-            ""
-          ]
+          "description": "The daemon initiates an outbound WebSocket connection to the server. No inbound ports are opened. No port forwarding, no firewall rules, no NAT traversal. The daemon works behind corporate firewalls because it's just an HTTPS connection going out."
         },
         {
           "file": "web/app.js",
           "line": 1,
+          "line_end": 5,
           "title": "Frontend — no tracking, no analytics",
-          "description": "The browser IDE is a static bundle served from the Go binary. No third-party scripts, no CDN loads, no analytics, no cookies (only localStorage for your display name). The frontend connects to exactly one WebSocket endpoint — the server you told it to connect to. View source to verify.",
-          "anchor_text": "import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers } from './editor.js';",
-          "anchor_context": [
-            "import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers } from './editor.js';",
-            "",
-            "let ws = null;"
-          ]
+          "description": "The browser IDE is a static bundle served from the Go binary. No third-party scripts, no CDN loads, no analytics, no cookies (only localStorage for your display name). The frontend connects to exactly one WebSocket endpoint — the server you told it to connect to. View source to verify."
         }
       ]
     }
