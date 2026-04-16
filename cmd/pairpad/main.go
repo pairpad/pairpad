@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,13 +13,19 @@ import (
 	"github.com/pairpad/pairpad/internal/server"
 )
 
+const version = "0.1.0"
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
 	}
 
-	switch os.Args[1] {
+	cmd := os.Args[1]
+	// Strip the subcommand so flag.Parse sees the right args
+	os.Args = append(os.Args[:1], os.Args[2:]...)
+
+	switch cmd {
 	case "local":
 		cmdLocal()
 	case "connect":
@@ -27,97 +34,65 @@ func main() {
 		cmdRelay()
 	case "login":
 		cmdLogin()
-	case "version":
-		fmt.Println("pairpad v0.0.1")
+	case "version", "--version", "-v":
+		fmt.Printf("pairpad %s\n", version)
+	case "help", "--help", "-h":
+		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", cmd)
 		printUsage()
 		os.Exit(1)
 	}
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: pairpad <command>
+	fmt.Fprintf(os.Stderr, `Pairpad — Annotate your codebase. Walk your team through it.
+
+Usage: pairpad <command> [flags]
 
 Commands:
-  local     Run everything locally (zero-config, opens browser)
-  connect   Connect this project to a remote relay server
-  relay     Run the relay server (for self-hosting or pairpad.dev)
-  login     Authenticate with the Pairpad server
-  version   Print version information
+  local       Run everything locally (relay + daemon, opens browser)
+  connect     Connect this project to a remote relay
+  relay       Run the relay server
+  version     Print version information
+  help        Show this help
+
+Run 'pairpad <command> --help' for details on each command.
 `)
 }
 
-// cmdConnect runs the daemon only, connecting to a remote relay server.
-func cmdConnect() {
-	dir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	cfg := daemon.Config{
-		ProjectDir: dir,
-		ServerURL:  envOrDefault("PAIRPAD_SERVER", "wss://localhost:8080"),
-	}
-
-	d, err := daemon.New(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("pairpad: serving %s\n", dir)
-	if err := d.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-// cmdRelay runs the relay server only.
-func cmdRelay() {
-	addr := envOrDefault("PAIRPAD_ADDR", ":8080")
-	cfg := server.Config{
-		Addr:      addr,
-		DBPath:    envOrDefault("DATABASE_PATH", defaultDBPath()),
-		PublicURL: envOrDefault("PAIRPAD_PUBLIC_URL", "http://localhost"+addr),
-	}
-
-	srv, err := server.New(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("pairpad server: listening on %s\n", cfg.Addr)
-	if err := srv.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-// cmdLocal runs both server and daemon in one process. Zero config.
 func cmdLocal() {
-	dir, err := os.Getwd()
+	fs := flag.NewFlagSet("local", flag.ExitOnError)
+	addr := fs.String("addr", envOrDefault("PAIRPAD_ADDR", ":8080"), "Relay listen address")
+	dir := fs.String("dir", ".", "Project directory")
+	noBrowser := fs.Bool("no-browser", false, "Don't open browser automatically")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, `Run relay + daemon together in one process. Zero configuration needed.
+
+Usage: pairpad local [flags]
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	fs.Parse(os.Args[1:])
+
+	projectDir, err := filepath.Abs(*dir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal("Invalid directory: %v", err)
 	}
 
-	addr := envOrDefault("PAIRPAD_ADDR", ":8080")
-	publicURL := fmt.Sprintf("http://localhost%s", addr)
+	publicURL := fmt.Sprintf("http://localhost%s", *addr)
 
-	// Start the server in background
 	srvCfg := server.Config{
-		Addr:      addr,
+		Addr:      *addr,
 		DBPath:    envOrDefault("DATABASE_PATH", defaultDBPath()),
 		PublicURL: publicURL,
 	}
 
 	srv, err := server.New(srvCfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal("Failed to start relay: %v", err)
 	}
 
 	errCh := make(chan error, 2)
@@ -125,43 +100,124 @@ func cmdLocal() {
 		errCh <- srv.Run()
 	}()
 
-	// Give the server a moment to start listening
 	time.Sleep(100 * time.Millisecond)
 
-	// Start the daemon connecting to the local server
 	daemonCfg := daemon.Config{
-		ProjectDir: dir,
-		ServerURL:  fmt.Sprintf("ws://localhost%s", addr),
+		ProjectDir: projectDir,
+		ServerURL:  fmt.Sprintf("ws://localhost%s", *addr),
 		OnReady: func(joinURL string) {
-			openBrowser(joinURL)
+			if !*noBrowser {
+				openBrowser(joinURL)
+			}
 		},
 	}
 
 	d, err := daemon.New(daemonCfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal("Failed to start daemon: %v", err)
 	}
 
-	fmt.Printf("pairpad local: serving %s on %s\n", dir, publicURL)
+	fmt.Printf("pairpad: serving %s on %s\n", projectDir, publicURL)
 
 	go func() {
 		errCh <- d.Run()
 	}()
 
-	// Wait for either to fail
 	if err := <-errCh; err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fatal("%v", err)
+	}
+}
+
+func cmdConnect() {
+	fs := flag.NewFlagSet("connect", flag.ExitOnError)
+	serverURL := fs.String("server", envOrDefault("PAIRPAD_SERVER", "ws://localhost:8080"), "Relay server URL")
+	dir := fs.String("dir", ".", "Project directory")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, `Connect this project to a remote relay server.
+
+Usage: pairpad connect [flags]
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	fs.Parse(os.Args[1:])
+
+	projectDir, err := filepath.Abs(*dir)
+	if err != nil {
+		fatal("Invalid directory: %v", err)
+	}
+
+	cfg := daemon.Config{
+		ProjectDir: projectDir,
+		ServerURL:  *serverURL,
+	}
+
+	d, err := daemon.New(cfg)
+	if err != nil {
+		fatal("Failed to start daemon: %v", err)
+	}
+
+	fmt.Printf("pairpad: connecting %s to %s\n", projectDir, *serverURL)
+	if err := d.Run(); err != nil {
+		fatal("%v", err)
+	}
+}
+
+func cmdRelay() {
+	fs := flag.NewFlagSet("relay", flag.ExitOnError)
+	addr := fs.String("addr", envOrDefault("PAIRPAD_ADDR", ":8080"), "Listen address")
+	dbPath := fs.String("db", envOrDefault("DATABASE_PATH", defaultDBPath()), "SQLite database path")
+	publicURL := fs.String("public-url", "", "Public URL for session links (default: http://localhost:<port>)")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, `Run the relay server. Browsers and daemons connect to this.
+
+Usage: pairpad relay [flags]
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	fs.Parse(os.Args[1:])
+
+	if *publicURL == "" {
+		*publicURL = envOrDefault("PAIRPAD_PUBLIC_URL", "http://localhost"+*addr)
+	}
+
+	cfg := server.Config{
+		Addr:      *addr,
+		DBPath:    *dbPath,
+		PublicURL: *publicURL,
+	}
+
+	srv, err := server.New(cfg)
+	if err != nil {
+		fatal("Failed to start relay: %v", err)
+	}
+
+	fmt.Printf("pairpad relay: listening on %s (db: %s)\n", *addr, *dbPath)
+	if err := srv.Run(); err != nil {
+		fatal("%v", err)
 	}
 }
 
 func cmdLogin() {
-	fmt.Println("pairpad: login not yet implemented")
+	fmt.Println("pairpad login: not yet implemented (coming soon for hosted service)")
+}
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "pairpad: "+format+"\n", args...)
+	os.Exit(1)
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func defaultDBPath() string {
-	// Follow XDG on Linux, standard paths on other platforms
 	dataDir := os.Getenv("XDG_DATA_HOME")
 	if dataDir == "" {
 		home, err := os.UserHomeDir()
@@ -178,13 +234,6 @@ func defaultDBPath() string {
 	dir := filepath.Join(dataDir, "pairpad")
 	os.MkdirAll(dir, 0o755)
 	return filepath.Join(dir, "pairpad.db")
-}
-
-func envOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 
 func openBrowser(url string) {

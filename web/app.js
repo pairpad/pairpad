@@ -124,20 +124,19 @@ window.joinSession = function() {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = (e) => {
     if (document.getElementById('ide').style.display === 'flex') {
-      setStatus('Disconnected — session ended or daemon stopped');
+      setStatus('Disconnected — session ended or daemon stopped. Reload to reconnect.');
     } else {
-      err.textContent = 'Could not connect. Check the session ID and try again.';
-      // Reset back to session step
+      err.textContent = e.code === 1006
+        ? 'Could not connect to relay. Is it running?'
+        : 'Session not found. Check the session ID and try again.';
       document.getElementById('step-name').style.display = 'none';
       document.getElementById('step-session').style.display = '';
     }
   };
 
-  ws.onerror = () => {
-    err.textContent = 'Connection failed.';
-  };
+  ws.onerror = () => {}; // onclose handles the error display
 
   ws.onmessage = (event) => {
     try {
@@ -164,6 +163,9 @@ function handleMessage(envelope) {
   switch (envelope.type) {
     case 'your_color':
       myColor = payload.color;
+      if (payload.project_name) {
+        document.title = `Pairpad — ${payload.project_name}`;
+      }
       break;
     case 'file_tree':
       fileTreeEntries = payload.files || [];

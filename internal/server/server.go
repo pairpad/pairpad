@@ -271,9 +271,18 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send participant's assigned color back
+	// Get project name for browser title
+	sess.mu.RLock()
+	projectName := sess.projectID[:12]
+	sess.mu.RUnlock()
+	if proj, err := s.store.GetProject(sess.projectID); err == nil {
+		projectName = proj.Name
+	}
+
 	colorData, err := protocol.Encode("your_color", struct {
-		Color string `json:"color"`
-	}{Color: p.color})
+		Color       string `json:"color"`
+		ProjectName string `json:"project_name"`
+	}{Color: p.color, ProjectName: projectName})
 	if err == nil {
 		conn.Write(r.Context(), websocket.MessageText, colorData)
 	}

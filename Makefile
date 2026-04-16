@@ -16,7 +16,7 @@ relay: bin/pairpad
 	./bin/pairpad relay
 
 connect: bin/pairpad
-	PAIRPAD_SERVER=ws://localhost:8080 ./bin/pairpad connect
+	./bin/pairpad connect -server ws://localhost:8080
 
 clean:
 	rm -rf bin/
