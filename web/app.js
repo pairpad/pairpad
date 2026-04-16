@@ -1,4 +1,5 @@
-import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers, setEditorTheme, getEditorTheme, setEditorEditable } from './editor.js';
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers, setEditorTheme, getEditorTheme, setEditorEditable, getView } from './editor.js';
+import { getSymbolAtLine, reanchorBySymbol } from './symbols.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
@@ -200,11 +201,12 @@ function handleMessage(envelope) {
       const changed = decodeContent(payload.content);
       openFiles.set(payload.path, changed);
       updateFileContent(payload.path, changed);
-      // Refresh markers in case the update reset them
+      // Refresh markers and re-anchor annotations via AST
       if (payload.path === getCurrentPath()) {
         requestAnimationFrame(() => {
           refreshCommentGutter();
           refreshTourMarkers();
+          reanchorAnnotationsForFile(payload.path);
         });
       }
       break;
@@ -411,6 +413,63 @@ function matchesTreeItem(item, filePath) {
   // Reconstruct path from the tree item by walking up through siblings/parents
   // Simpler approach: store path as data attribute
   return item.dataset.filePath === filePath;
+}
+
+// --- AST Re-anchoring ---
+
+function reanchorAnnotationsForFile(file) {
+  const v = getView();
+  if (!v) return;
+
+  let changed = false;
+  const updatedComments = [];
+  const updatedTours = [];
+
+  // Re-anchor comments for this file
+  for (const c of comments) {
+    if (c.file !== file || c.parent_id) continue;
+    if (!c.symbol_path) continue;
+
+    const newLine = reanchorBySymbol(v, c.symbol_path, c.symbol_offset || 0);
+    if (newLine !== null && newLine !== c.line) {
+      const updated = { ...c, line: newLine, orphaned: false };
+      updatedComments.push(updated);
+      changed = true;
+    } else if (newLine === null && !c.orphaned) {
+      const updated = { ...c, orphaned: true };
+      updatedComments.push(updated);
+      changed = true;
+    }
+  }
+
+  // Re-anchor tour steps for this file
+  for (const tour of allTours) {
+    let tourChanged = false;
+    const updatedSteps = tour.steps.map(step => {
+      if (step.file !== file || !step.symbol_path) return step;
+      const newLine = reanchorBySymbol(v, step.symbol_path, step.symbol_offset || 0);
+      if (newLine !== null && newLine !== step.line) {
+        tourChanged = true;
+        return { ...step, line: newLine, orphaned: false };
+      } else if (newLine === null && !step.orphaned) {
+        tourChanged = true;
+        return { ...step, orphaned: true };
+      }
+      return step;
+    });
+    if (tourChanged) {
+      updatedTours.push({ ...tour, steps: updatedSteps });
+      changed = true;
+    }
+  }
+
+  // Send corrected annotations to relay
+  if (changed) {
+    const msg = {};
+    if (updatedComments.length > 0) msg.comments = updatedComments;
+    if (updatedTours.length > 0) msg.tours = updatedTours;
+    send('reanchor', msg);
+  }
 }
 
 // --- Roles ---
@@ -913,7 +972,13 @@ window.addCommentAtLine = function(line, lineEnd) {
   input.style.cssText = 'width:100%;background:#313244;border:1px solid #45475a;color:#cdd6f4;padding:6px 8px;border-radius:4px;font-size:12px;outline:none;';
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && input.value.trim()) {
-      send('comment_add', { file, line, line_end: lineEnd || 0, body: input.value.trim() });
+      const sym = getSymbolAtLine(getView(), line);
+      send('comment_add', {
+        file, line, line_end: lineEnd || 0,
+        body: input.value.trim(),
+        symbol_path: sym ? sym.symbolPath : '',
+        symbol_offset: sym ? sym.symbolOffset : 0,
+      });
       tempInput.remove();
     }
     if (e.key === 'Escape') {

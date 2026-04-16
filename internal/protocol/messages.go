@@ -43,6 +43,7 @@ const (
 	TypeGuideState     MessageType = "guide_state"
 	TypeFollowStatus   MessageType = "follow_status"
 	TypeSetRole        MessageType = "set_role"
+	TypeReanchor       MessageType = "reanchor"
 
 	// Server → Browser (relayed from daemon)
 	TypeParticipantList MessageType = "participant_list"
@@ -203,12 +204,14 @@ type CursorState struct {
 // CommentAdd is sent by a browser to create a new comment thread.
 // Author and Color are populated by the server before relaying to the daemon.
 type CommentAdd struct {
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	LineEnd int    `json:"line_end,omitempty"`
-	Body    string `json:"body"`
-	Author  string `json:"author,omitempty"`
-	Color   string `json:"color,omitempty"`
+	File         string `json:"file"`
+	Line         int    `json:"line"`
+	LineEnd      int    `json:"line_end,omitempty"`
+	Body         string `json:"body"`
+	Author       string `json:"author,omitempty"`
+	Color        string `json:"color,omitempty"`
+	SymbolPath   string `json:"symbol_path,omitempty"`
+	SymbolOffset int    `json:"symbol_offset,omitempty"`
 }
 
 // CommentReply is sent by a browser to reply to an existing comment.
@@ -237,6 +240,8 @@ type Comment struct {
 	Body             string   `json:"body"`
 	Timestamp        int64    `json:"timestamp"`
 	Resolved         bool     `json:"resolved"`
+	SymbolPath       string   `json:"symbol_path,omitempty"`
+	SymbolOffset     int      `json:"symbol_offset,omitempty"`
 	AnchorText       string   `json:"anchor_text,omitempty"`
 	AnchorContext    []string `json:"anchor_context,omitempty"`
 	AnchorTextEnd    string   `json:"anchor_text_end,omitempty"`
@@ -276,6 +281,8 @@ type TourStep struct {
 	LineEnd          int      `json:"line_end,omitempty"`
 	Title            string   `json:"title"`
 	Description      string   `json:"description"`
+	SymbolPath       string   `json:"symbol_path,omitempty"`
+	SymbolOffset     int      `json:"symbol_offset,omitempty"`
 	AnchorText       string   `json:"anchor_text,omitempty"`
 	AnchorContext    []string `json:"anchor_context,omitempty"`
 	AnchorTextEnd    string   `json:"anchor_text_end,omitempty"`
@@ -305,6 +312,13 @@ type TourDelete struct {
 type FollowStatus struct {
 	Name      string `json:"name"`
 	Following bool   `json:"following"`
+}
+
+// Reanchor is sent by the browser with corrected annotation positions
+// after re-parsing a changed file with the AST.
+type Reanchor struct {
+	Comments []Comment `json:"comments,omitempty"`
+	Tours    []Tour    `json:"tours,omitempty"`
 }
 
 // SetRole is sent by the host to change a participant's role.

@@ -373,14 +373,16 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			comment := protocol.Comment{
-				ID:        generateID(),
-				Author:    p.name,
-				Color:     p.color,
-				File:      msg.File,
-				Line:      msg.Line,
-				LineEnd:   msg.LineEnd,
-				Body:      msg.Body,
-				Timestamp: time.Now().UnixMilli(),
+				ID:           generateID(),
+				Author:       p.name,
+				Color:        p.color,
+				File:         msg.File,
+				Line:         msg.Line,
+				LineEnd:      msg.LineEnd,
+				Body:         msg.Body,
+				Timestamp:    time.Now().UnixMilli(),
+				SymbolPath:   msg.SymbolPath,
+				SymbolOffset: msg.SymbolOffset,
 			}
 			// Populate anchor from file cache
 			if lines := sess.getFileLines(msg.File); lines != nil {
@@ -524,6 +526,25 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			sess.guideState = data
 			sess.mu.Unlock()
 			sess.broadcastToBrowsers(r.Context(), data)
+
+		case protocol.TypeReanchor:
+			// Browser has re-parsed files and computed corrected positions
+			var msg protocol.Reanchor
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			if len(msg.Comments) > 0 {
+				if err := s.store.UpdateComments(sess.projectID, msg.Comments); err != nil {
+					log.Printf("failed to update reanchored comments: %v", err)
+				}
+				s.broadcastComments(r.Context(), sess)
+			}
+			if len(msg.Tours) > 0 {
+				if err := s.store.UpdateTours(sess.projectID, msg.Tours); err != nil {
+					log.Printf("failed to update reanchored tours: %v", err)
+				}
+				s.broadcastTours(r.Context(), sess)
+			}
 
 		case protocol.TypeSetRole:
 			if !sess.isHost(conn) {

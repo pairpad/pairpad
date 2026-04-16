@@ -380,6 +380,10 @@ export function getCurrentPath() {
   return currentPath;
 }
 
+export function getView() {
+  return view;
+}
+
 // Callback holders — set by the app
 let onSaveCallback = () => {};
 export function setOnSave(fn) {
