@@ -1,21 +1,22 @@
-.PHONY: build server daemon clean frontend
+.PHONY: build local relay connect clean frontend
 
-build: frontend bin/server bin/pairpad
+build: frontend bin/pairpad
 
 frontend:
 	cd web && npm run build
 
-bin/server: frontend $(shell find cmd/server internal -name '*.go')
-	go build -o bin/server ./cmd/server
-
-bin/pairpad: $(shell find cmd/pairpad internal -name '*.go')
+bin/pairpad: frontend $(shell find cmd internal -name '*.go')
 	go build -o bin/pairpad ./cmd/pairpad
 
-server: bin/server
-	./bin/server
+# Development shortcuts
+local: bin/pairpad
+	./bin/pairpad local
 
-daemon: bin/pairpad
-	PAIRPAD_SERVER=ws://localhost:8080 ./bin/pairpad serve
+relay: bin/pairpad
+	./bin/pairpad relay
+
+connect: bin/pairpad
+	PAIRPAD_SERVER=ws://localhost:8080 ./bin/pairpad connect
 
 clean:
 	rm -rf bin/

@@ -20,6 +20,7 @@ import (
 type Config struct {
 	ProjectDir string
 	ServerURL  string
+	OnReady    func(joinURL string) // called when session is ready (optional)
 }
 
 // Daemon connects the local filesystem to the Pairpad server.
@@ -253,6 +254,9 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 			return err
 		}
 		fmt.Printf("\n  Session is ready! Share this link to collaborate:\n\n    %s\n\n", msg.JoinURL)
+		if d.cfg.OnReady != nil {
+			d.cfg.OnReady(msg.JoinURL)
+		}
 
 	case protocol.TypePing:
 		return d.send(ctx, conn, protocol.TypePong, nil)
