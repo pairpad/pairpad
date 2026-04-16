@@ -196,6 +196,7 @@ function refreshUnifiedMarkers() {
 // --- Theme management ---
 
 const themeCompartment = new Compartment();
+const editableCompartment = new Compartment();
 let currentTheme = 'dark';
 
 const lightTheme = EditorView.theme({
@@ -219,6 +220,14 @@ export function setEditorTheme(theme) {
 
 export function getEditorTheme() {
   return currentTheme;
+}
+
+export function setEditorEditable(editable) {
+  if (view) {
+    view.dispatch({
+      effects: editableCompartment.reconfigure(EditorView.editable.of(editable)),
+    });
+  }
 }
 
 // Create the base extensions shared across all editor instances
@@ -254,6 +263,7 @@ function baseExtensions(onSave) {
     highlightActiveLine(),
     highlightSelectionMatches(),
     themeCompartment.of(currentTheme === 'dark' ? oneDark : lightTheme),
+    editableCompartment.of(EditorView.editable.of(true)),
     keymap.of([
       ...closeBracketsKeymap,
       ...defaultKeymap,
@@ -309,6 +319,8 @@ export function openFileInEditor(path, content) {
   // Restore previous state for this file if we have one
   if (fileStates.has(path)) {
     view.setState(fileStates.get(path));
+    // Clear stale markers — they'll be repopulated by requestAnimationFrame
+    clearAllMarkers();
     return;
   }
 
@@ -323,6 +335,18 @@ export function openFileInEditor(path, content) {
   });
 
   view.setState(state);
+}
+
+function clearAllMarkers() {
+  if (!view) return;
+  view.dispatch({
+    effects: [
+      markerEffect.of(RangeSet.empty),
+      guideHighlightEffect.of(Decoration.none),
+      guideCursorEffect.of(Decoration.none),
+      peerHighlightEffect.of(Decoration.none),
+    ],
+  });
 }
 
 export function updateFileContent(path, content) {

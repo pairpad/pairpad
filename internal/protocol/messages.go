@@ -8,6 +8,7 @@ import "time"
 // MessageType identifies the kind of WebSocket message.
 type MessageType string
 
+
 const (
 	// Daemon → Server
 	TypeFileTree    MessageType = "file_tree"
@@ -40,6 +41,7 @@ const (
 	TypeGuideStop      MessageType = "guide_stop"
 	TypeGuideState     MessageType = "guide_state"
 	TypeFollowStatus   MessageType = "follow_status"
+	TypeSetRole        MessageType = "set_role"
 
 	// Server → Browser (relayed from daemon)
 	TypeParticipantList MessageType = "participant_list"
@@ -137,17 +139,29 @@ type SaveFile struct {
 type SessionReady struct {
 	SessionID string `json:"session_id"`
 	JoinURL   string `json:"join_url"`
+	HostToken string `json:"host_token"`
 }
 
 // Identify is sent by the browser immediately after connecting.
 type Identify struct {
-	Name string `json:"name"`
+	Name      string `json:"name"`
+	HostToken string `json:"host_token,omitempty"`
 }
+
+// Role is a session participant's permission level.
+type Role string
+
+const (
+	RoleHost      Role = "host"
+	RoleEditor    Role = "editor"
+	RoleCommenter Role = "commenter"
+)
 
 // Participant describes a connected user in a session.
 type Participant struct {
 	Name  string `json:"name"`
 	Color string `json:"color"`
+	Role  Role   `json:"role"`
 }
 
 // ParticipantList is broadcast to all browsers when someone joins or leaves.
@@ -283,6 +297,12 @@ type TourDelete struct {
 type FollowStatus struct {
 	Name      string `json:"name"`
 	Following bool   `json:"following"`
+}
+
+// SetRole is sent by the host to change a participant's role.
+type SetRole struct {
+	TargetName string `json:"target_name"`
+	Role       Role   `json:"role"`
 }
 
 // Error carries an error message.

@@ -1,4 +1,4 @@
-import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers, setEditorTheme, getEditorTheme } from './editor.js';
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers, setEditorTheme, getEditorTheme, setEditorEditable } from './editor.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
@@ -17,6 +17,8 @@ let creatingTour = false;      // are we in tour creation mode?
 let sessionId = null;
 let userName = null;
 let myColor = null;
+let myRole = null;
+let hostToken = null;
 let editorView = null;
 
 // --- Connection (two-step: session ID, then name) ---
@@ -25,9 +27,17 @@ window.submitSession = function() {
   let input = document.getElementById('session-input').value.trim();
   if (!input) return;
 
-  // Support pasting a full URL — extract the hash
+  // Support pasting a full URL — extract the hash and query params
   if (input.includes('#')) {
     input = input.split('#').pop();
+  }
+
+  // Extract host token if present (e.g. "sessionid?host=abc123")
+  if (input.includes('?')) {
+    const parts = input.split('?');
+    input = parts[0];
+    const params = new URLSearchParams(parts[1]);
+    hostToken = params.get('host') || null;
   }
 
   sessionId = input;
@@ -64,8 +74,10 @@ window.joinSession = function() {
   ws = new WebSocket(url);
 
   ws.onopen = () => {
-    // Send identify immediately
-    send('identify', { name: userName });
+    // Send identify with host token if we have one
+    const identifyMsg = { name: userName };
+    if (hostToken) identifyMsg.host_token = hostToken;
+    send('identify', identifyMsg);
 
     document.getElementById('connect-overlay').style.display = 'none';
     document.getElementById('ide').style.display = 'flex';
@@ -188,6 +200,13 @@ function handleMessage(envelope) {
       const changed = decodeContent(payload.content);
       openFiles.set(payload.path, changed);
       updateFileContent(payload.path, changed);
+      // Refresh markers in case the update reset them
+      if (payload.path === getCurrentPath()) {
+        requestAnimationFrame(() => {
+          refreshCommentGutter();
+          refreshTourMarkers();
+        });
+      }
       break;
     }
     case 'file_deleted':
@@ -240,6 +259,17 @@ let participants = [];
 
 function renderParticipants(list) {
   participants = list;
+
+  // Track own role
+  const me = participants.find(p => p.name === userName);
+  const prevRole = myRole;
+  if (me) myRole = me.role;
+
+  // Toast on role change (not on initial load)
+  if (prevRole && myRole && prevRole !== myRole) {
+    showRoleToast(myRole);
+  }
+
   const container = document.getElementById('participant-list');
   container.innerHTML = '';
 
@@ -256,13 +286,27 @@ function renderParticipants(list) {
     name.className = 'participant-name';
     if (p.name === userName) {
       name.classList.add('you');
-      name.textContent = `${p.name} (you)`;
+      name.textContent = `${p.name} (you, ${p.role})`;
     } else {
-      name.textContent = p.name;
+      name.textContent = `${p.name} (${p.role})`;
       // Clickable — jump to their cursor location
       badge.style.cursor = 'pointer';
       badge.title = 'Click to jump to their location';
-      badge.addEventListener('click', () => jumpToParticipant(p.name));
+      badge.addEventListener('click', (e) => {
+        // If host and right-click area, show role menu
+        if (e.detail === 2 && myRole === 'host') {
+          showRoleMenu(p.name, p.role, badge);
+        } else {
+          jumpToParticipant(p.name);
+        }
+      });
+      // Host can right-click to change role
+      if (myRole === 'host') {
+        badge.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          showRoleMenu(p.name, p.role, badge);
+        });
+      }
     }
 
     badge.appendChild(dot);
@@ -276,6 +320,8 @@ function renderParticipants(list) {
 
     container.appendChild(badge);
   }
+
+  applyRoleRestrictions();
 
   // Update file labels from cursor state
   renderParticipantLocations();
@@ -365,6 +411,77 @@ function matchesTreeItem(item, filePath) {
   // Reconstruct path from the tree item by walking up through siblings/parents
   // Simpler approach: store path as data attribute
   return item.dataset.filePath === filePath;
+}
+
+// --- Roles ---
+
+function showRoleMenu(targetName, currentRole, anchorEl) {
+  // Remove any existing menu
+  document.querySelectorAll('.role-menu').forEach(el => el.remove());
+
+  const menu = document.createElement('div');
+  menu.className = 'role-menu';
+  menu.style.cssText = `position:absolute;background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px;padding:4px 0;z-index:300;font-size:12px;min-width:120px;`;
+
+  const rect = anchorEl.getBoundingClientRect();
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = rect.left + 'px';
+
+  for (const role of ['editor', 'commenter']) {
+    const item = document.createElement('div');
+    item.style.cssText = `padding:4px 12px;cursor:pointer;color:var(--text-primary);`;
+    item.textContent = role;
+    if (role === currentRole) {
+      item.style.fontWeight = '700';
+      item.style.color = 'var(--accent)';
+    }
+    item.addEventListener('mouseenter', () => { item.style.background = 'var(--bg-hover)'; });
+    item.addEventListener('mouseleave', () => { item.style.background = ''; });
+    item.addEventListener('click', () => {
+      send('set_role', { target_name: targetName, role });
+      menu.remove();
+    });
+    menu.appendChild(item);
+  }
+
+  document.body.appendChild(menu);
+
+  // Close on click outside
+  const close = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.remove();
+      document.removeEventListener('click', close);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+function showRoleToast(role) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = `You are now ${role === 'editor' ? 'an' : 'a'} ${role}`;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+function applyRoleRestrictions() {
+  const canEdit = myRole === 'host' || myRole === 'editor';
+
+  // Guide button: host only
+  const guideBtn = document.getElementById('guide-btn');
+  if (guideBtn) {
+    guideBtn.style.display = myRole === 'host' ? '' : 'none';
+  }
+
+  // Tour creation: editor or host
+  const tourActions = document.getElementById('tour-actions');
+  if (tourActions) {
+    tourActions.style.display = canEdit ? 'flex' : 'none';
+  }
+
+  // Editor: read-only for commenters
+  setEditorEditable(canEdit);
 }
 
 // --- File tree ---
@@ -544,6 +661,7 @@ function removeTab(path) {
 
 function saveFile() {
   if (!activeFile) return;
+  if (myRole !== 'host' && myRole !== 'editor') return;
   const content = getEditorContent();
   if (content == null) return;
 
@@ -975,6 +1093,8 @@ function applyGuideState(state) {
         document.getElementById('tour-step-counter').textContent = `${activeTourStep + 1} / ${guideTour.steps.length}`;
         document.getElementById('tour-prev').disabled = activeTourStep === 0;
         document.getElementById('tour-next').disabled = activeTourStep === guideTour.steps.length - 1;
+        // Apply tour range highlight on follower after file loads
+        pendingTourHighlight = step;
       }
     }
   } else if (activeTour && guideName && guideName !== userName) {
@@ -1012,8 +1132,15 @@ function applyGuideState(state) {
       setGuideCursorLine(null, null);
     }
 
-    // Show guide's selection highlight
-    if (state.selection_from && state.selection_to) {
+    // Show tour range highlight if a tour step has a range
+    if (pendingTourHighlight) {
+      const step = pendingTourHighlight;
+      pendingTourHighlight = null;
+      if (step.line_end && step.line_end > step.line) {
+        setGuideHighlight(step.line, step.line_end, TOUR_COLOR);
+      }
+    } else if (state.selection_from && state.selection_to) {
+      // Show guide's selection highlight
       setGuideHighlight(state.selection_from, state.selection_to, guideColor);
     } else {
       setGuideHighlight(null, null, null);
@@ -1024,6 +1151,7 @@ function applyGuideState(state) {
 }
 
 let pendingGuideState = null;
+let pendingTourHighlight = null;
 
 // Broadcast guide state — called when the guide scrolls, selects, or switches files
 let guideStateRaf = null;

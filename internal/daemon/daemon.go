@@ -253,16 +253,26 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		if err := protocol.DecodePayload(env, &msg); err != nil {
 			return err
 		}
-		fmt.Printf("\n  Session is ready! Share this link to collaborate:\n\n    %s\n\n", msg.JoinURL)
+		// Print host URL (with token) for the daemon owner
+		hostURL := msg.JoinURL + "?host=" + msg.HostToken
+		fmt.Printf("\n  Session is ready!\n\n")
+		fmt.Printf("  Host (you):    %s\n", hostURL)
+		fmt.Printf("  Collaborators: %s\n\n", msg.JoinURL)
 		if d.cfg.OnReady != nil {
-			d.cfg.OnReady(msg.JoinURL)
+			d.cfg.OnReady(hostURL)
 		}
 
 	case protocol.TypePing:
 		return d.send(ctx, conn, protocol.TypePong, nil)
 
+	case protocol.TypeError:
+		var msg protocol.Error
+		if err := protocol.DecodePayload(env, &msg); err == nil {
+			log.Printf("server error: %s", msg.Message)
+		}
+
 	default:
-		log.Printf("unhandled message type: %s", env.Type)
+		log.Printf("unhandled message: %s payload=%s", env.Type, string(env.Payload))
 	}
 
 	return nil

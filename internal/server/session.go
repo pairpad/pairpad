@@ -27,6 +27,7 @@ type participant struct {
 	conn          *websocket.Conn
 	name          string
 	color         string
+	role          protocol.Role
 	cursorFile    string
 	cursorLine    int
 	selectionFrom int
@@ -42,15 +43,17 @@ type session struct {
 	participants map[*websocket.Conn]*participant
 	fileTree     []protocol.FileEntry
 	colorIndex   int
+	hostToken    string
 	// pendingFiles tracks which browser requested which file, so
 	// file_content responses are routed only to the requester.
 	pendingFiles map[string]*websocket.Conn // path -> requesting conn
 }
 
-func newSession(id string, daemon *websocket.Conn) *session {
+func newSession(id string, daemon *websocket.Conn, hostToken string) *session {
 	return &session{
 		id:           id,
 		daemon:       daemon,
+		hostToken:    hostToken,
 		participants:  make(map[*websocket.Conn]*participant),
 		pendingFiles: make(map[string]*websocket.Conn),
 	}
@@ -78,12 +81,53 @@ func (s *session) removeBrowser(conn *websocket.Conn) {
 	delete(s.participants, conn)
 }
 
-func (s *session) identifyBrowser(conn *websocket.Conn, name string) {
+func (s *session) identifyBrowser(conn *websocket.Conn, name string, hostToken string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if p, ok := s.participants[conn]; ok {
 		p.name = name
+		if hostToken != "" && hostToken == s.hostToken {
+			p.role = protocol.RoleHost
+		} else {
+			p.role = protocol.RoleCommenter // default for new joiners
+		}
 	}
+}
+
+func (s *session) setRole(targetName string, role protocol.Role) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.participants {
+		if p.name == targetName && p.role != protocol.RoleHost {
+			p.role = role
+			return
+		}
+	}
+}
+
+func (s *session) isHost(conn *websocket.Conn) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.participants[conn]
+	return ok && p.role == protocol.RoleHost
+}
+
+func (s *session) hasRole(conn *websocket.Conn, minRole protocol.Role) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.participants[conn]
+	if !ok {
+		return false
+	}
+	switch minRole {
+	case protocol.RoleCommenter:
+		return true // everyone can do commenter-level actions
+	case protocol.RoleEditor:
+		return p.role == protocol.RoleEditor || p.role == protocol.RoleHost
+	case protocol.RoleHost:
+		return p.role == protocol.RoleHost
+	}
+	return false
 }
 
 func (s *session) getParticipantList() []protocol.Participant {
@@ -97,6 +141,7 @@ func (s *session) getParticipantList() []protocol.Participant {
 		list = append(list, protocol.Participant{
 			Name:  p.name,
 			Color: p.color,
+			Role:  p.role,
 		})
 	}
 	return list

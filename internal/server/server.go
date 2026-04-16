@@ -85,7 +85,8 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
 	sessionID := generateID()
-	sess := newSession(sessionID, conn)
+	hostToken := generateID()
+	sess := newSession(sessionID, conn, hostToken)
 
 	s.mu.Lock()
 	s.sessions[sessionID] = sess
@@ -93,11 +94,12 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("daemon connected, session %s", sessionID)
 
-	// Send session_ready to daemon with the join URL
+	// Send session_ready to daemon with the join URL and host token
 	joinURL := fmt.Sprintf("%s/#%s", s.cfg.PublicURL, sessionID)
 	readyData, err := protocol.Encode(protocol.TypeSessionReady, protocol.SessionReady{
 		SessionID: sessionID,
 		JoinURL:   joinURL,
+		HostToken: hostToken,
 	})
 	if err == nil {
 		conn.Write(r.Context(), websocket.MessageText, readyData)
@@ -151,8 +153,15 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 		case protocol.TypePong:
 			// Keepalive response, nothing to do
 
+		case protocol.TypeError:
+			// Log and ignore — daemon is reporting an error (e.g. can't read a file)
+			var msg protocol.Error
+			if err := protocol.DecodePayload(env, &msg); err == nil {
+				log.Printf("daemon error: %s", msg.Message)
+			}
+
 		default:
-			log.Printf("unhandled daemon message: %s", env.Type)
+			log.Printf("unhandled daemon message: %s payload=%s", env.Type, string(env.Payload))
 		}
 	}
 }
@@ -205,8 +214,8 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		if env.Type == protocol.TypeIdentify {
 			var msg protocol.Identify
 			if err := protocol.DecodePayload(env, &msg); err == nil && msg.Name != "" {
-				sess.identifyBrowser(conn, msg.Name)
-				log.Printf("%s joined session %s (color %s)", msg.Name, sessionID, p.color)
+				sess.identifyBrowser(conn, msg.Name, msg.HostToken)
+				log.Printf("%s joined session %s (color %s, role %s)", msg.Name, sessionID, p.color, p.role)
 				break
 			}
 		}
@@ -270,6 +279,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			// Acknowledged, no action needed — daemon doesn't track open files
 
 		case protocol.TypeSaveFile:
+			if !sess.hasRole(conn, protocol.RoleEditor) {
+				continue
+			}
 			var msg protocol.SaveFile
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
@@ -291,6 +303,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			s.broadcastCursorState(r.Context(), sess)
 
 		case protocol.TypeCommentAdd:
+			if !sess.hasRole(conn, protocol.RoleCommenter) {
+				continue
+			}
 			// Inject author info and relay to daemon
 			var msg protocol.CommentAdd
 			if err := protocol.DecodePayload(env, &msg); err != nil {
@@ -308,6 +323,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case protocol.TypeCommentReply:
+			if !sess.hasRole(conn, protocol.RoleCommenter) {
+				continue
+			}
 			// Inject author info and relay to daemon
 			var msg protocol.CommentReply
 			if err := protocol.DecodePayload(env, &msg); err != nil {
@@ -325,14 +343,22 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case protocol.TypeCommentResolve:
-			// Relay directly to daemon
+			if !sess.hasRole(conn, protocol.RoleCommenter) {
+				continue
+			}
 			sess.writeToDaemon(r.Context(), data)
 
 		case protocol.TypeTourSave, protocol.TypeTourDelete:
+			if !sess.hasRole(conn, protocol.RoleEditor) {
+				continue
+			}
 			// Relay to daemon for persistence
 			sess.writeToDaemon(r.Context(), data)
 
 		case protocol.TypeGuideStart:
+			if !sess.hasRole(conn, protocol.RoleHost) {
+				continue
+			}
 			// Inject guide's name and color, broadcast to all browsers
 			var msg protocol.GuideStart
 			if err := protocol.DecodePayload(env, &msg); err != nil {
@@ -350,10 +376,27 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case protocol.TypeGuideStop:
+			if !sess.hasRole(conn, protocol.RoleHost) {
+				continue
+			}
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypeGuideState:
+			if !sess.hasRole(conn, protocol.RoleHost) {
+				continue
+			}
 			sess.broadcastToBrowsers(r.Context(), data)
+
+		case protocol.TypeSetRole:
+			if !sess.isHost(conn) {
+				continue
+			}
+			var msg protocol.SetRole
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			sess.setRole(msg.TargetName, msg.Role)
+			s.broadcastParticipants(r.Context(), sess)
 
 		case protocol.TypeFollowStatus:
 			// Inject name and broadcast
@@ -372,7 +415,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 
 		default:
-			log.Printf("unhandled browser message: %s", env.Type)
+			log.Printf("unhandled browser message: %s payload=%s", env.Type, string(env.Payload))
 		}
 	}
 }
