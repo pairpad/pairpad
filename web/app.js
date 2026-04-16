@@ -4,6 +4,7 @@ import { getSymbolAtLine, reanchorBySymbol } from './symbols.js';
 let ws = null;
 let openFiles = new Map(); // path -> content string
 let activeFile = null;
+let fileTreeEntries = []; // latest file tree from daemon
 let cursorState = []; // latest cursor_state from server
 
 // Guide mode state
@@ -165,7 +166,8 @@ function handleMessage(envelope) {
       myColor = payload.color;
       break;
     case 'file_tree':
-      renderFileTree(payload.files);
+      fileTreeEntries = payload.files || [];
+      renderFileTree(fileTreeEntries);
       break;
     case 'file_content': {
       const content = decodeContent(payload.content);
@@ -211,10 +213,23 @@ function handleMessage(envelope) {
       }
       break;
     }
+    case 'file_created': {
+      const content = decodeContent(payload.content);
+      openFiles.set(payload.path, content);
+      // Add to file tree if not already there
+      if (!fileTreeEntries.some(f => f.path === payload.path)) {
+        fileTreeEntries.push({ path: payload.path, size: content.length, is_dir: false });
+        renderFileTree(fileTreeEntries);
+      }
+      break;
+    }
     case 'file_deleted':
       openFiles.delete(payload.path);
       removeTab(payload.path);
       closeFileInEditor(payload.path);
+      // Remove from file tree
+      fileTreeEntries = fileTreeEntries.filter(f => f.path !== payload.path);
+      renderFileTree(fileTreeEntries);
       if (activeFile === payload.path) {
         activeFile = null;
         switchToLastTab();
@@ -545,6 +560,8 @@ function applyRoleRestrictions() {
 
 // --- File tree ---
 
+const collapsedDirs = new Set(); // tracks which directory paths are collapsed
+
 function renderFileTree(files) {
   const root = { children: {}, isDir: true };
 
@@ -590,18 +607,28 @@ function renderTreeNode(node, container, depth) {
     label.textContent = entry.name;
 
     if (entry.isDir) {
-      icon.textContent = '\u25BE';
+      const isCollapsed = collapsedDirs.has(entry.path);
+      icon.textContent = isCollapsed ? '\u25B8' : '\u25BE';
+      if (isCollapsed) item.classList.add('collapsed');
       item.appendChild(icon);
       item.appendChild(label);
 
       const children = document.createElement('div');
       children.className = 'children';
+      if (isCollapsed) children.style.display = 'none';
       renderTreeNode(entry, children, depth + 1);
 
       item.addEventListener('click', (e) => {
         e.stopPropagation();
+        const nowCollapsed = !item.classList.contains('collapsed');
         item.classList.toggle('collapsed');
-        icon.textContent = item.classList.contains('collapsed') ? '\u25B8' : '\u25BE';
+        icon.textContent = nowCollapsed ? '\u25B8' : '\u25BE';
+        children.style.display = nowCollapsed ? 'none' : '';
+        if (nowCollapsed) {
+          collapsedDirs.add(entry.path);
+        } else {
+          collapsedDirs.delete(entry.path);
+        }
       });
 
       container.appendChild(item);
