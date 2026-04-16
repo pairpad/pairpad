@@ -1246,10 +1246,17 @@ function handleTourList(tours) {
     pendingTourSelect = null;
     populateTourSelect();
     if (prevId) {
-      // Re-select and reload the tour with updated data
-      selectTourById(prevId);
+      const prevStep = activeTourStep;
+      // Update the tour data without navigating
+      activeTour = allTours.find(t => t.id === prevId) || null;
+      if (activeTour && prevStep >= 0) {
+        activeTourStep = Math.min(prevStep, activeTour.steps.length - 1);
+      }
       const sel = document.getElementById('tour-select');
       sel.value = prevId;
+      refreshTourMarkers();
+      refreshCommentGutter();
+      renderTourFileTreeIndicators();
     }
   }
 }
