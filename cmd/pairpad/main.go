@@ -57,7 +57,7 @@ Commands:
   version     Print version information
   help        Show this help
 
-Run 'pairpad <command> --help' for details on each command.
+Run 'pairpad <command> -help' for details on each command.
 `)
 }
 

@@ -25,7 +25,7 @@ One person runs the relay, everyone else connects:
 ./bin/pairpad relay
 
 # On each developer's machine (the daemon)
-./bin/pairpad connect --server ws://relay-host:8080
+./bin/pairpad connect -server ws://relay-host:8080
 ```
 
 The daemon prints two URLs:
@@ -74,9 +74,9 @@ Commands:
   version     Print version
 
 Flags:
-  --addr      Relay listen address (default :8080)
-  --server    Relay URL for connect mode (default ws://localhost:8080)
-  --dir       Project directory (default: current directory)
+  -addr       Relay listen address (default :8080)
+  -server     Relay URL for connect mode (default ws://localhost:8080)
+  -dir        Project directory (default: current directory)
 
 Environment Variables:
   PAIRPAD_ADDR        Relay listen address
