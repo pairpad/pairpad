@@ -178,6 +178,7 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 			Color:     msg.Color,
 			File:      msg.File,
 			Line:      msg.Line,
+			LineEnd:   msg.LineEnd,
 			Body:      msg.Body,
 			Timestamp: time.Now().UnixMilli(),
 		}

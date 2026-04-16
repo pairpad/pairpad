@@ -577,10 +577,12 @@ let previousCommentIds = new Set();
 function refreshCommentGutter() {
   const file = getCurrentPath();
   if (!file) return;
-  const lines = comments
-    .filter(c => c.file === file && !c.parent_id && !c.resolved && !c.orphaned)
-    .map(c => ({ line: c.line, color: c.color }));
-  updateCommentMarkers(lines);
+  const entries = [];
+  for (const c of comments) {
+    if (c.file !== file || c.parent_id || c.resolved || c.orphaned) continue;
+    entries.push({ line: c.line, lineEnd: c.line_end || 0, color: c.color });
+  }
+  updateCommentMarkers(entries);
 }
 
 function handleCommentList(newComments) {
@@ -628,7 +630,7 @@ function renderCommentFeed() {
     // Location link — always clickable, even for orphaned (jumps to last-known location)
     const loc = document.createElement('div');
     loc.className = 'comment-location';
-    loc.textContent = `${root.file.split('/').pop()}:${root.line}`;
+    loc.textContent = formatLocation(root.file, root.line, root.line_end);
     loc.addEventListener('click', () => jumpToComment(root));
     thread.appendChild(loc);
 
@@ -734,8 +736,12 @@ function jumpToComment(comment) {
 // Add comment from gutter click — exposed globally for CodeMirror
 // Unified gutter click handler — routes to tour creation, tour navigation, or comments
 window.onGutterClick = function(line) {
+  // Get selection range — if user selected multiple lines, use the range
+  const sel = getSelectionLines();
+  const lineEnd = (sel && sel.from !== sel.to) ? sel.to : 0;
+
   if (creatingTour) {
-    window.addTourStepAtLine(line);
+    window.addTourStepAtLine(line, lineEnd);
     return;
   }
   // If a tour is active and this line has a step, navigate to it
@@ -747,10 +753,10 @@ window.onGutterClick = function(line) {
       return;
     }
   }
-  window.addCommentAtLine(line);
+  window.addCommentAtLine(line, lineEnd);
 };
 
-window.addCommentAtLine = function(line) {
+window.addCommentAtLine = function(line, lineEnd) {
 
   const file = getCurrentPath();
   if (!file) return;
@@ -781,7 +787,7 @@ window.addCommentAtLine = function(line) {
 
   const loc = document.createElement('div');
   loc.className = 'comment-location';
-  loc.textContent = `${file.split('/').pop()}:${line}`;
+  loc.textContent = formatLocation(file, line, lineEnd);
   tempInput.appendChild(loc);
 
   const input = document.createElement('input');
@@ -789,7 +795,7 @@ window.addCommentAtLine = function(line) {
   input.style.cssText = 'width:100%;background:#313244;border:1px solid #45475a;color:#cdd6f4;padding:6px 8px;border-radius:4px;font-size:12px;outline:none;';
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && input.value.trim()) {
-      send('comment_add', { file, line, body: input.value.trim() });
+      send('comment_add', { file, line, line_end: lineEnd || 0, body: input.value.trim() });
       tempInput.remove();
     }
     if (e.key === 'Escape') {
@@ -846,7 +852,7 @@ function showToast(comment) {
   toast.appendChild(document.createElement('br'));
   const toastLoc = document.createElement('span');
   toastLoc.className = 'toast-location';
-  toastLoc.textContent = `${comment.file.split('/').pop()}:${comment.line}`;
+  toastLoc.textContent = formatLocation(comment.file, comment.line, comment.line_end);
   toast.appendChild(toastLoc);
   toast.addEventListener('click', () => {
     jumpToComment(comment);
@@ -1196,6 +1202,12 @@ function goToTourStep(idx) {
     requestAnimationFrame(() => {
       refreshTourMarkers();
       refreshCommentGutter();
+      // Highlight range if step has one
+      if (step.line_end && step.line_end > step.line) {
+        setGuideHighlight(step.line, step.line_end, TOUR_COLOR);
+      } else {
+        setGuideHighlight(null, null, null);
+      }
     });
   } else {
     pendingTourStep = idx;
@@ -1329,7 +1341,7 @@ window.cancelTourCreation = function() {
 };
 
 // Gutter click during tour creation — add a step
-window.addTourStepAtLine = function(line) {
+window.addTourStepAtLine = function(line, lineEnd) {
   const file = getCurrentPath();
   if (!file) return;
 
@@ -1337,13 +1349,14 @@ window.addTourStepAtLine = function(line) {
   if (reanchoringStepIdx !== null && reanchoringStepIdx < newTourSteps.length) {
     newTourSteps[reanchoringStepIdx].file = file;
     newTourSteps[reanchoringStepIdx].line = line;
+    newTourSteps[reanchoringStepIdx].line_end = lineEnd || 0;
     reanchoringStepIdx = null;
     renderNewTourSteps();
     refreshCreationMarkers();
     return;
   }
 
-  newTourSteps.push({ file, line, title: '', description: '' });
+  newTourSteps.push({ file, line, line_end: lineEnd || 0, title: '', description: '' });
   renderNewTourSteps();
   refreshCreationMarkers();
 
@@ -1481,7 +1494,8 @@ window.saveTour = function() {
     steps: newTourSteps.map(s => ({
       file: s.file,
       line: s.line,
-      title: s.title || `Step at ${s.file.split('/').pop()}:${s.line}`,
+      line_end: s.line_end || 0,
+      title: s.title || `Step at ${formatLocation(s.file, s.line, s.line_end)}`,
       description: s.description || '',
     })),
   };
@@ -1490,6 +1504,14 @@ window.saveTour = function() {
   send('tour_save', tour);
   cancelTourCreation();
 };
+
+function formatLocation(file, line, lineEnd) {
+  const name = file.split('/').pop();
+  if (lineEnd && lineEnd > line) {
+    return `${name}:${line}-${lineEnd}`;
+  }
+  return `${name}:${line}`;
+}
 
 function escapeAttr(s) {
   return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');

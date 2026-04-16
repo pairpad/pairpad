@@ -136,10 +136,16 @@ func (ts *tourStore) reanchorFile(relPath string) bool {
 			newIdx, orphaned := findAnchorLine(lines, step.Line-1, step.AnchorText, step.AnchorContext)
 			newLine := newIdx + 1
 
-			if orphaned && !step.Orphaned {
+			newEndIdx := -1
+			endOrphaned := false
+			if step.LineEnd > 0 && step.AnchorTextEnd != "" {
+				newEndIdx, endOrphaned = findAnchorLine(lines, step.LineEnd-1, step.AnchorTextEnd, step.AnchorContextEnd)
+			}
+
+			if (orphaned || endOrphaned) && !step.Orphaned {
 				step.Orphaned = true
 				changed = true
-			} else if !orphaned {
+			} else if !orphaned && !endOrphaned {
 				if step.Orphaned {
 					step.Orphaned = false
 					changed = true
@@ -148,6 +154,14 @@ func (ts *tourStore) reanchorFile(relPath string) bool {
 					step.Line = newLine
 					step.AnchorContext = getAnchorContext(lines, newIdx)
 					changed = true
+				}
+				if newEndIdx >= 0 {
+					newLineEnd := newEndIdx + 1
+					if step.LineEnd != newLineEnd {
+						step.LineEnd = newLineEnd
+						step.AnchorContextEnd = getAnchorContext(lines, newEndIdx)
+						changed = true
+					}
 				}
 			}
 		}
@@ -164,6 +178,11 @@ func (ts *tourStore) populateStepAnchor(step *protocol.TourStep) {
 	}
 	step.AnchorText = lines[step.Line-1]
 	step.AnchorContext = getAnchorContext(lines, step.Line-1)
+
+	if step.LineEnd > step.Line && step.LineEnd <= len(lines) {
+		step.AnchorTextEnd = lines[step.LineEnd-1]
+		step.AnchorContextEnd = getAnchorContext(lines, step.LineEnd-1)
+	}
 }
 
 // initRuntime creates the runtime copy and populates anchors for steps

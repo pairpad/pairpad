@@ -82,13 +82,18 @@ function getLanguageExtension(filename) {
 const markerEffect = StateEffect.define();
 
 class CommentMarker extends GutterMarker {
-  constructor(color) {
+  constructor(color, rangePos) {
     super();
     this.color = color;
+    this.rangePos = rangePos; // 'start', 'mid', 'end', or null (single line)
   }
   toDOM() {
     const el = document.createElement('div');
-    el.style.cssText = `width:6px;height:6px;border-radius:50%;background:${this.color || '#89b4fa'};margin:auto;`;
+    if (this.rangePos === 'mid') {
+      el.style.cssText = `width:2px;height:100%;background:${this.color || '#89b4fa'};margin:0 auto;`;
+    } else {
+      el.style.cssText = `width:6px;height:6px;border-radius:50%;background:${this.color || '#89b4fa'};margin:auto;`;
+    }
     return el;
   }
 }
@@ -162,12 +167,23 @@ function refreshUnifiedMarkers() {
   }
 
   // Comment markers (show on lines that don't already have a tour marker)
+  // Each entry: { line, lineEnd, color }
   const tourLines = new Set(currentTourMarkers.map(s => s.line));
-  for (const { line, color } of currentCommentMarkers) {
-    if (tourLines.has(line)) continue;
-    if (line >= 1 && line <= view.state.doc.lines) {
-      const lineInfo = view.state.doc.line(line);
-      markers.push(new CommentMarker(color).range(lineInfo.from));
+  for (const entry of currentCommentMarkers) {
+    const { line, lineEnd, color } = entry;
+    const end = (lineEnd && lineEnd > line) ? lineEnd : line;
+
+    for (let l = line; l <= end; l++) {
+      if (tourLines.has(l)) continue;
+      if (l < 1 || l > view.state.doc.lines) continue;
+      const lineInfo = view.state.doc.line(l);
+      let rangePos = null;
+      if (end > line) {
+        if (l === line) rangePos = 'start';
+        else if (l === end) rangePos = 'end';
+        else rangePos = 'mid';
+      }
+      markers.push(new CommentMarker(color, rangePos).range(lineInfo.from));
     }
   }
 

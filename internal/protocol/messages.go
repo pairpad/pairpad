@@ -181,11 +181,12 @@ type CursorState struct {
 // CommentAdd is sent by a browser to create a new comment thread.
 // Author and Color are populated by the server before relaying to the daemon.
 type CommentAdd struct {
-	File   string `json:"file"`
-	Line   int    `json:"line"`
-	Body   string `json:"body"`
-	Author string `json:"author,omitempty"`
-	Color  string `json:"color,omitempty"`
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	LineEnd int    `json:"line_end,omitempty"`
+	Body    string `json:"body"`
+	Author  string `json:"author,omitempty"`
+	Color   string `json:"color,omitempty"`
 }
 
 // CommentReply is sent by a browser to reply to an existing comment.
@@ -204,18 +205,21 @@ type CommentResolve struct {
 
 // Comment represents a single comment in a thread.
 type Comment struct {
-	ID            string   `json:"id"`
-	ParentID      string   `json:"parent_id,omitempty"`
-	Author        string   `json:"author"`
-	Color         string   `json:"color"`
-	File          string   `json:"file"`
-	Line          int      `json:"line"`
-	Body          string   `json:"body"`
-	Timestamp     int64    `json:"timestamp"`
-	Resolved      bool     `json:"resolved"`
-	AnchorText    string   `json:"anchor_text,omitempty"`
-	AnchorContext []string `json:"anchor_context,omitempty"`
-	Orphaned      bool     `json:"orphaned,omitempty"`
+	ID               string   `json:"id"`
+	ParentID         string   `json:"parent_id,omitempty"`
+	Author           string   `json:"author"`
+	Color            string   `json:"color"`
+	File             string   `json:"file"`
+	Line             int      `json:"line"`
+	LineEnd          int      `json:"line_end,omitempty"`
+	Body             string   `json:"body"`
+	Timestamp        int64    `json:"timestamp"`
+	Resolved         bool     `json:"resolved"`
+	AnchorText       string   `json:"anchor_text,omitempty"`
+	AnchorContext    []string `json:"anchor_context,omitempty"`
+	AnchorTextEnd    string   `json:"anchor_text_end,omitempty"`
+	AnchorContextEnd []string `json:"anchor_context_end,omitempty"`
+	Orphaned         bool     `json:"orphaned,omitempty"`
 }
 
 // CommentList is broadcast to all browsers with the full comment state.
@@ -245,13 +249,16 @@ type GuideState struct {
 
 // TourStep is a single step in a guided tour.
 type TourStep struct {
-	File          string   `json:"file"`
-	Line          int      `json:"line"`
-	Title         string   `json:"title"`
-	Description   string   `json:"description"`
-	AnchorText    string   `json:"anchor_text,omitempty"`
-	AnchorContext []string `json:"anchor_context,omitempty"`
-	Orphaned      bool     `json:"orphaned,omitempty"`
+	File             string   `json:"file"`
+	Line             int      `json:"line"`
+	LineEnd          int      `json:"line_end,omitempty"`
+	Title            string   `json:"title"`
+	Description      string   `json:"description"`
+	AnchorText       string   `json:"anchor_text,omitempty"`
+	AnchorContext    []string `json:"anchor_context,omitempty"`
+	AnchorTextEnd    string   `json:"anchor_text_end,omitempty"`
+	AnchorContextEnd []string `json:"anchor_context_end,omitempty"`
+	Orphaned         bool     `json:"orphaned,omitempty"`
 }
 
 // Tour is a named, ordered walkthrough of the codebase.

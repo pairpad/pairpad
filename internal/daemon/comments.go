@@ -118,6 +118,11 @@ func (cs *commentStore) populateAnchor(c *protocol.Comment) {
 
 	c.AnchorText = lines[c.Line-1]
 	c.AnchorContext = getAnchorContext(lines, c.Line-1)
+
+	if c.LineEnd > c.Line && c.LineEnd <= len(lines) {
+		c.AnchorTextEnd = lines[c.LineEnd-1]
+		c.AnchorContextEnd = getAnchorContext(lines, c.LineEnd-1)
+	}
 }
 
 // reanchorFile re-anchors all comments for a given file after it changes.
@@ -139,10 +144,17 @@ func (cs *commentStore) reanchorFile(relPath string) bool {
 		newIdx, orphaned := findAnchorLine(lines, c.Line-1, c.AnchorText, c.AnchorContext)
 		newLine := newIdx + 1
 
-		if orphaned && !c.Orphaned {
+		// Re-anchor end line if this is a range comment
+		newEndIdx := -1
+		endOrphaned := false
+		if c.LineEnd > 0 && c.AnchorTextEnd != "" {
+			newEndIdx, endOrphaned = findAnchorLine(lines, c.LineEnd-1, c.AnchorTextEnd, c.AnchorContextEnd)
+		}
+
+		if (orphaned || endOrphaned) && !c.Orphaned {
 			c.Orphaned = true
 			changed = true
-		} else if !orphaned {
+		} else if !orphaned && !endOrphaned {
 			if c.Orphaned {
 				c.Orphaned = false
 				changed = true
@@ -152,10 +164,19 @@ func (cs *commentStore) reanchorFile(relPath string) bool {
 				c.AnchorContext = getAnchorContext(lines, newIdx)
 				changed = true
 			}
+			if newEndIdx >= 0 {
+				newLineEnd := newEndIdx + 1
+				if c.LineEnd != newLineEnd {
+					c.LineEnd = newLineEnd
+					c.AnchorContextEnd = getAnchorContext(lines, newEndIdx)
+					changed = true
+				}
+			}
 			// Update replies' line numbers to match parent
 			for j := range cs.comments {
 				if cs.comments[j].ParentID == c.ID {
 					cs.comments[j].Line = c.Line
+					cs.comments[j].LineEnd = c.LineEnd
 				}
 			}
 		}
