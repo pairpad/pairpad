@@ -44,6 +44,10 @@ type session struct {
 	fileTree     []protocol.FileEntry
 	colorIndex   int
 	hostToken    string
+	guideActive  bool
+	guideName    string
+	guideColor   string
+	guideState   []byte // last guide_state message, raw
 	// pendingFiles tracks which browser requested which file, so
 	// file_content responses are routed only to the requester.
 	pendingFiles map[string]*websocket.Conn // path -> requesting conn

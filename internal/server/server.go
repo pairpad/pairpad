@@ -250,6 +250,22 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		sess.writeToDaemon(r.Context(), reqTours)
 	}
 
+	// If guide mode is active, send guide_start and latest guide_state to the new joiner
+	sess.mu.RLock()
+	if sess.guideActive {
+		startData, err := protocol.Encode(protocol.TypeGuideStart, protocol.GuideStart{
+			Name:  sess.guideName,
+			Color: sess.guideColor,
+		})
+		if err == nil {
+			conn.Write(r.Context(), websocket.MessageText, startData)
+		}
+		if sess.guideState != nil {
+			conn.Write(r.Context(), websocket.MessageText, sess.guideState)
+		}
+	}
+	sess.mu.RUnlock()
+
 	// Read messages from browser and relay to daemon
 	for {
 		_, data, err := conn.Read(r.Context())
@@ -372,6 +388,11 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			msg.Color = p.color
 			relayData, err := protocol.Encode(protocol.TypeGuideStart, msg)
 			if err == nil {
+				sess.mu.Lock()
+				sess.guideActive = true
+				sess.guideName = p.name
+				sess.guideColor = p.color
+				sess.mu.Unlock()
 				sess.broadcastToBrowsers(r.Context(), relayData)
 			}
 
@@ -379,12 +400,21 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if !sess.hasRole(conn, protocol.RoleHost) {
 				continue
 			}
+			sess.mu.Lock()
+			sess.guideActive = false
+			sess.guideName = ""
+			sess.guideColor = ""
+			sess.guideState = nil
+			sess.mu.Unlock()
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypeGuideState:
 			if !sess.hasRole(conn, protocol.RoleHost) {
 				continue
 			}
+			sess.mu.Lock()
+			sess.guideState = data
+			sess.mu.Unlock()
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypeSetRole:

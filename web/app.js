@@ -1139,8 +1139,17 @@ function applyGuideState(state) {
       if (step.line_end && step.line_end > step.line) {
         setGuideHighlight(step.line, step.line_end, TOUR_COLOR);
       }
+    } else if (activeTour && activeTourStep >= 0) {
+      // Keep tour highlight active while viewing a tour step
+      const step = activeTour.steps[activeTourStep];
+      if (step && step.line_end && step.line_end > step.line && getCurrentPath() === step.file) {
+        setGuideHighlight(step.line, step.line_end, TOUR_COLOR);
+      } else if (state.selection_from && state.selection_to) {
+        setGuideHighlight(state.selection_from, state.selection_to, guideColor);
+      } else {
+        setGuideHighlight(null, null, null);
+      }
     } else if (state.selection_from && state.selection_to) {
-      // Show guide's selection highlight
       setGuideHighlight(state.selection_from, state.selection_to, guideColor);
     } else {
       setGuideHighlight(null, null, null);
