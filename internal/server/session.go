@@ -8,18 +8,19 @@ import (
 	"github.com/coder/websocket"
 )
 
-// Colors assigned to participants in join order (Catppuccin Mocha palette).
+// Colors assigned to participants in join order (Catppuccin Frappe palette).
+// Frappe is the mid-range variant — works on both dark and light backgrounds.
 var participantColors = []string{
-	"#89b4fa", // blue
-	"#a6e3a1", // green
-	"#f9e2af", // yellow
-	"#cba6f7", // mauve
-	"#fab387", // peach
-	"#94e2d5", // teal
-	"#f38ba8", // red
-	"#74c7ec", // sapphire
-	"#f5c2e7", // pink
-	"#b4befe", // lavender
+	"#8caaee", // blue
+	"#a6d189", // green
+	"#e5c890", // yellow
+	"#ca9ee6", // mauve
+	"#ef9f76", // peach
+	"#81c8be", // teal
+	"#e78284", // red
+	"#85c1dc", // sapphire
+	"#f4b8e4", // pink
+	"#babbf1", // lavender
 }
 
 // participant tracks a connected browser user.

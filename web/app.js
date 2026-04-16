@@ -1231,7 +1231,7 @@ let allTours = [];
 let activeTour = null;   // current Tour object
 let activeTourStep = -1; // current step index
 
-const TOUR_COLOR = '#f9e2af'; // yellow from Catppuccin
+const TOUR_COLOR = '#e5c890'; // yellow from Catppuccin Frappe
 
 function handleTourList(tours) {
   allTours = tours;
