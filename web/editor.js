@@ -1,5 +1,5 @@
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, highlightActiveLine, rectangularSelection, crosshairCursor, gutter, GutterMarker, Decoration } from '@codemirror/view';
-import { EditorState, StateField, StateEffect, RangeSet } from '@codemirror/state';
+import { EditorState, StateField, StateEffect, RangeSet, Compartment } from '@codemirror/state';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
@@ -193,6 +193,34 @@ function refreshUnifiedMarkers() {
   });
 }
 
+// --- Theme management ---
+
+const themeCompartment = new Compartment();
+let currentTheme = 'dark';
+
+const lightTheme = EditorView.theme({
+  '&': { backgroundColor: '#ffffff', color: '#24292e' },
+  '.cm-gutters': { backgroundColor: '#f6f8fa', color: '#6a737d', borderRight: '1px solid #e1e4e8' },
+  '.cm-activeLineGutter': { backgroundColor: '#e8eaed' },
+  '.cm-activeLine': { backgroundColor: '#f6f8fa' },
+  '.cm-selectionBackground': { backgroundColor: '#b4d5fe' },
+  '&.cm-focused .cm-selectionBackground': { backgroundColor: '#b4d5fe' },
+  '.cm-cursor': { borderLeftColor: '#24292e' },
+}, { dark: false });
+
+export function setEditorTheme(theme) {
+  currentTheme = theme;
+  if (view) {
+    view.dispatch({
+      effects: themeCompartment.reconfigure(theme === 'dark' ? oneDark : lightTheme),
+    });
+  }
+}
+
+export function getEditorTheme() {
+  return currentTheme;
+}
+
 // Create the base extensions shared across all editor instances
 function baseExtensions(onSave) {
   return [
@@ -225,7 +253,7 @@ function baseExtensions(onSave) {
     crosshairCursor(),
     highlightActiveLine(),
     highlightSelectionMatches(),
-    oneDark,
+    themeCompartment.of(currentTheme === 'dark' ? oneDark : lightTheme),
     keymap.of([
       ...closeBracketsKeymap,
       ...defaultKeymap,

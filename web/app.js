@@ -1,4 +1,4 @@
-import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers } from './editor.js';
+import { initEditor, openFileInEditor, updateFileContent, getEditorContent, closeFileInEditor, setOnSave, setOnCursorChange, getCursorLine, getCurrentPath, scrollToLine, updateCommentMarkers, getTopVisibleLine, getSelectionLines, scrollToTopLine, setGuideHighlight, setGuideCursorLine, setPeerHighlights, updateTourMarkers, setEditorTheme, getEditorTheme } from './editor.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
@@ -1519,6 +1519,37 @@ function escapeAttr(s) {
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+// --- Theme toggle ---
+
+window.toggleTheme = function() {
+  const current = getEditorTheme();
+  const next = current === 'dark' ? 'light' : 'dark';
+  setEditorTheme(next);
+  document.documentElement.className = `theme-${next}`;
+  localStorage.setItem('pairpad-theme', next);
+  updateThemeButton();
+};
+
+function updateThemeButton() {
+  const btn = document.getElementById('theme-btn');
+  if (btn) {
+    btn.textContent = getEditorTheme() === 'dark' ? '\u263E' : '\u2600';
+  }
+}
+
+// Apply saved theme on load
+(function() {
+  const saved = localStorage.getItem('pairpad-theme') || 'dark';
+  document.documentElement.className = `theme-${saved}`;
+  if (saved !== 'dark') {
+    // Editor theme will be applied when initEditor is called
+    // For now just set the variable so it picks up the right theme
+    setEditorTheme(saved);
+  }
+  // Set button icon after DOM is ready
+  requestAnimationFrame(updateThemeButton);
+})();
 
 // --- Auto-join from URL hash ---
 
