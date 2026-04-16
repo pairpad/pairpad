@@ -273,7 +273,9 @@ func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event 
 	case protocol.TypeFileCreated, protocol.TypeFileChanged:
 		content, err := readFile(d.cfg.ProjectDir, event.RelPath, d.ignore)
 		if err != nil {
-			return err
+			// File may have been deleted between the event and the read
+			// (common with temp files from editors and build tools)
+			return nil
 		}
 
 		// Re-anchor comments for this file

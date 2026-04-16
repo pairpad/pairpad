@@ -17,9 +17,11 @@ var hardDenyPatterns = []string{
 	"*.pem",
 	"*.key",
 	"*.tmp",
+	"*.temp",
 	"*.swp",
 	"*.swo",
 	"*~",
+	"tags",
 	"node_modules",
 }
 
