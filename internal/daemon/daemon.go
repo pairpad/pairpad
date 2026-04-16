@@ -278,10 +278,15 @@ func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event 
 			return nil
 		}
 
-		// Re-anchor comments for this file
+		// Re-anchor comments and tours for this file
 		if d.comments.reanchorFile(event.RelPath) {
 			if err := d.sendComments(ctx, conn); err != nil {
 				log.Printf("error broadcasting re-anchored comments: %v", err)
+			}
+		}
+		if d.tours.reanchorFile(event.RelPath) {
+			if err := d.sendTours(ctx, conn); err != nil {
+				log.Printf("error broadcasting re-anchored tours: %v", err)
 			}
 		}
 

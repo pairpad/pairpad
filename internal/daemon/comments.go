@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/pairpad/pairpad/internal/protocol"
@@ -112,13 +111,13 @@ func (cs *commentStore) populateAnchor(c *protocol.Comment) {
 		return // replies inherit parent's anchor
 	}
 
-	lines := cs.readFileLines(c.File)
+	lines := readFileLines(cs.projectDir, c.File)
 	if lines == nil || c.Line < 1 || c.Line > len(lines) {
 		return
 	}
 
 	c.AnchorText = lines[c.Line-1]
-	c.AnchorContext = cs.getContext(lines, c.Line-1)
+	c.AnchorContext = getAnchorContext(lines, c.Line-1)
 }
 
 // reanchorFile re-anchors all comments for a given file after it changes.
@@ -127,7 +126,7 @@ func (cs *commentStore) reanchorFile(relPath string) bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	lines := cs.readFileLines(relPath)
+	lines := readFileLines(cs.projectDir, relPath)
 	changed := false
 
 	for i := range cs.comments {
@@ -136,7 +135,10 @@ func (cs *commentStore) reanchorFile(relPath string) bool {
 			continue
 		}
 
-		newLine, orphaned := cs.findAnchor(lines, c)
+		// Use 0-based index for the shared anchor functions
+		newIdx, orphaned := findAnchorLine(lines, c.Line-1, c.AnchorText, c.AnchorContext)
+		newLine := newIdx + 1
+
 		if orphaned && !c.Orphaned {
 			c.Orphaned = true
 			changed = true
@@ -147,7 +149,7 @@ func (cs *commentStore) reanchorFile(relPath string) bool {
 			}
 			if c.Line != newLine {
 				c.Line = newLine
-				c.AnchorContext = cs.getContext(lines, newLine-1)
+				c.AnchorContext = getAnchorContext(lines, newIdx)
 				changed = true
 			}
 			// Update replies' line numbers to match parent
@@ -163,88 +165,4 @@ func (cs *commentStore) reanchorFile(relPath string) bool {
 		cs.save()
 	}
 	return changed
-}
-// New stuff...
-
-
-// findAnchor tries to locate the anchor text in the file.
-// Returns (new line number 1-based, orphaned bool).
-func (cs *commentStore) findAnchor(lines []string, c *protocol.Comment) (int, bool) {
-	if lines == nil {
-		return c.Line, true // file doesn't exist or can't be read
-	}
-
-	// 1. Check if the anchor text is still at the original line
-	if c.Line >= 1 && c.Line <= len(lines) && lines[c.Line-1] == c.AnchorText {
-		return c.Line, false
-	}
-
-	// 2. Search for exact match anywhere in the file
-	for i, line := range lines {
-		if line == c.AnchorText {
-			return i + 1, false
-		}
-	}
-
-	// 3. Fuzzy match using context — find best-matching window
-	if len(c.AnchorContext) > 0 {
-		bestScore := 0
-		bestLine := -1
-
-		for i := range lines {
-			score := cs.contextMatchScore(lines, i, c.AnchorContext)
-			if score > bestScore {
-				bestScore = score
-				bestLine = i
-			}
-		}
-
-		// Require at least half the context lines to match
-		if bestLine >= 0 && bestScore >= len(c.AnchorContext)/2 {
-			return bestLine + 1, false
-		}
-	}
-
-	// 4. No match found — orphaned
-	return c.Line, true
-}
-
-// contextMatchScore returns how many context lines match around position idx.
-func (cs *commentStore) contextMatchScore(lines []string, idx int, context []string) int {
-	score := 0
-	contextStart := idx - contextRadius
-	for i, ctxLine := range context {
-		fileIdx := contextStart + i
-		if fileIdx >= 0 && fileIdx < len(lines) {
-			if strings.TrimSpace(lines[fileIdx]) == strings.TrimSpace(ctxLine) {
-				score++
-			}
-		}
-	}
-	return score
-}
-
-// getContext returns contextRadius lines above and below (inclusive of the anchor line).
-func (cs *commentStore) getContext(lines []string, idx int) []string {
-	start := idx - contextRadius
-	if start < 0 {
-		start = 0
-	}
-	end := idx + contextRadius + 1
-	if end > len(lines) {
-		end = len(lines)
-	}
-	context := make([]string, end-start)
-	copy(context, lines[start:end])
-	return context
-}
-
-// readFileLines reads a file and returns its lines.
-func (cs *commentStore) readFileLines(relPath string) []string {
-	absPath := filepath.Join(cs.projectDir, relPath)
-	data, err := os.ReadFile(absPath)
-	if err != nil {
-		return nil
-	}
-	return strings.Split(string(data), "\n")
 }

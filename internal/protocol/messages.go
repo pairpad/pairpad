@@ -245,10 +245,13 @@ type GuideState struct {
 
 // TourStep is a single step in a guided tour.
 type TourStep struct {
-	File        string `json:"file"`
-	Line        int    `json:"line"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	File          string   `json:"file"`
+	Line          int      `json:"line"`
+	Title         string   `json:"title"`
+	Description   string   `json:"description"`
+	AnchorText    string   `json:"anchor_text,omitempty"`
+	AnchorContext []string `json:"anchor_context,omitempty"`
+	Orphaned      bool     `json:"orphaned,omitempty"`
 }
 
 // Tour is a named, ordered walkthrough of the codebase.
