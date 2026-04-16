@@ -94,16 +94,15 @@ func (cs *commentStore) resolve(id string) error {
 	return nil
 }
 
-func (cs *commentStore) findComment(id string) *protocol.Comment {
+func (cs *commentStore) findComment(id string) (protocol.Comment, bool) {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 	for i := range cs.comments {
 		if cs.comments[i].ID == id {
-			c := cs.comments[i]
-			return &c
+			return cs.comments[i], true
 		}
 	}
-	return nil
+	return protocol.Comment{}, false
 }
 
 // populateAnchor reads the file and fills in anchor_text and anchor_context.

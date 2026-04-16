@@ -837,7 +837,17 @@ function showToast(comment) {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
   toast.className = 'toast';
-  toast.innerHTML = `<span class="toast-author" style="color:${comment.color}">${comment.author}</span> commented<br><span class="toast-location">${comment.file.split('/').pop()}:${comment.line}</span>`;
+  const toastAuthor = document.createElement('span');
+  toastAuthor.className = 'toast-author';
+  toastAuthor.style.color = comment.color;
+  toastAuthor.textContent = comment.author;
+  toast.appendChild(toastAuthor);
+  toast.appendChild(document.createTextNode(' commented'));
+  toast.appendChild(document.createElement('br'));
+  const toastLoc = document.createElement('span');
+  toastLoc.className = 'toast-location';
+  toastLoc.textContent = `${comment.file.split('/').pop()}:${comment.line}`;
+  toast.appendChild(toastLoc);
   toast.addEventListener('click', () => {
     jumpToComment(comment);
     toast.remove();
@@ -1056,7 +1066,8 @@ function updateGuideUI() {
   } else if (guideName && guideName !== userName) {
     btn.style.display = 'none';
     banner.style.display = 'flex';
-    bannerText.innerHTML = `<span style="color:${guideColor}">${guideName}</span> is guiding`;
+    bannerText.textContent = `${guideName} is guiding`;
+    bannerText.style.color = guideColor;
     banner.style.background = guideColor + '22';
     banner.style.borderColor = guideColor;
     followBtn.style.display = '';

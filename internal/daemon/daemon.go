@@ -191,8 +191,8 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		if err := protocol.DecodePayload(env, &msg); err != nil {
 			return err
 		}
-		parent := d.comments.findComment(msg.ParentID)
-		if parent == nil {
+		parent, found := d.comments.findComment(msg.ParentID)
+		if !found {
 			return nil
 		}
 		reply := protocol.Comment{

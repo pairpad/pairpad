@@ -234,11 +234,11 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	// Ask daemon to send comments and tours (daemon broadcasts to all browsers)
 	reqComments, err := protocol.Encode(protocol.TypeRequestComments, nil)
 	if err == nil {
-		sess.daemon.Write(r.Context(), websocket.MessageText, reqComments)
+		sess.writeToDaemon(r.Context(), reqComments)
 	}
 	reqTours, err := protocol.Encode(protocol.TypeRequestTours, nil)
 	if err == nil {
-		sess.daemon.Write(r.Context(), websocket.MessageText, reqTours)
+		sess.writeToDaemon(r.Context(), reqTours)
 	}
 
 	// Read messages from browser and relay to daemon
@@ -263,8 +263,11 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			sess.trackFileRequest(msg.Path, conn)
 			reqData, err := protocol.Encode(protocol.TypeRequestFile, protocol.RequestFile{Path: msg.Path})
 			if err == nil {
-				sess.daemon.Write(r.Context(), websocket.MessageText, reqData)
+				sess.writeToDaemon(r.Context(), reqData)
 			}
+
+		case protocol.TypeCloseFile:
+			// Acknowledged, no action needed — daemon doesn't track open files
 
 		case protocol.TypeSaveFile:
 			var msg protocol.SaveFile
@@ -276,7 +279,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				Content: msg.Content,
 			})
 			if err == nil {
-				sess.daemon.Write(r.Context(), websocket.MessageText, writeData)
+				sess.writeToDaemon(r.Context(), writeData)
 			}
 
 		case protocol.TypeCursorUpdate:
@@ -301,7 +304,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			msg.Color = p.color
 			relayData, err := protocol.Encode(protocol.TypeCommentAdd, msg)
 			if err == nil {
-				sess.daemon.Write(r.Context(), websocket.MessageText, relayData)
+				sess.writeToDaemon(r.Context(), relayData)
 			}
 
 		case protocol.TypeCommentReply:
@@ -318,16 +321,16 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			msg.Color = p.color
 			relayData, err := protocol.Encode(protocol.TypeCommentReply, msg)
 			if err == nil {
-				sess.daemon.Write(r.Context(), websocket.MessageText, relayData)
+				sess.writeToDaemon(r.Context(), relayData)
 			}
 
 		case protocol.TypeCommentResolve:
 			// Relay directly to daemon
-			sess.daemon.Write(r.Context(), websocket.MessageText, data)
+			sess.writeToDaemon(r.Context(), data)
 
 		case protocol.TypeTourSave, protocol.TypeTourDelete:
 			// Relay to daemon for persistence
-			sess.daemon.Write(r.Context(), websocket.MessageText, data)
+			sess.writeToDaemon(r.Context(), data)
 
 		case protocol.TypeGuideStart:
 			// Inject guide's name and color, broadcast to all browsers

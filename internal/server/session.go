@@ -166,8 +166,21 @@ func (s *session) getFileTree() []protocol.FileEntry {
 // broadcastToBrowsers sends a message to all connected browser clients.
 func (s *session) broadcastToBrowsers(ctx context.Context, data []byte) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	conns := make([]*websocket.Conn, 0, len(s.participants))
 	for conn := range s.participants {
+		conns = append(conns, conn)
+	}
+	s.mu.RUnlock()
+	for _, conn := range conns {
 		conn.Write(ctx, websocket.MessageText, data)
+	}
+}
+
+// writeToDaemon serializes writes to the daemon WebSocket.
+func (s *session) writeToDaemon(ctx context.Context, data []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.daemon != nil {
+		s.daemon.Write(ctx, websocket.MessageText, data)
 	}
 }
