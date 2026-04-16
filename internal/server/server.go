@@ -188,10 +188,11 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 		case protocol.TypeFileChanged, protocol.TypeFileCreated:
 			// Cache updated content, re-anchor, and broadcast to browsers
 			var msg protocol.FileContent
-			if err := protocol.DecodePayload(env, &msg); err == nil {
-				sess.cacheFileContent(msg.Path, msg.Content)
-				s.reanchorFile(r.Context(), sess, msg.Path)
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
 			}
+			sess.cacheFileContent(msg.Path, msg.Content)
+			s.reanchorFile(r.Context(), sess, msg.Path)
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypeFileDeleted,
@@ -273,13 +274,16 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	// Send participant's assigned color back
 	// Get project name for browser title
 	sess.mu.RLock()
-	projectName := sess.projectID[:12]
+	projectName := sess.projectID
+	if len(projectName) > 12 {
+		projectName = projectName[:12]
+	}
 	sess.mu.RUnlock()
 	if proj, err := s.store.GetProject(sess.projectID); err == nil {
 		projectName = proj.Name
 	}
 
-	colorData, err := protocol.Encode("your_color", struct {
+	colorData, err := protocol.Encode(protocol.TypeYourColor, struct {
 		Color       string `json:"color"`
 		ProjectName string `json:"project_name"`
 	}{Color: p.color, ProjectName: projectName})

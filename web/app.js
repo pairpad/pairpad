@@ -1620,7 +1620,7 @@ function renderNewTourSteps() {
     if (reanchoringStepIdx === i) div.classList.add('reanchoring');
     div.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-        <div class="step-location"><span class="step-goto" data-idx="${i}" style="cursor:pointer;" title="Go to this step">${i + 1}. ${step.file.split('/').pop()}</span>:<input type="number" class="step-line-input" value="${step.line}" data-idx="${i}" min="1" style="width:50px;background:#45475a;border:1px solid #585b70;color:#cdd6f4;padding:1px 4px;border-radius:3px;font-size:11px;"></div>
+        <div class="step-location"><span class="step-goto" data-idx="${i}" style="cursor:pointer;" title="Go to this step">${i + 1}. ${escapeHtml(step.file.split('/').pop())}</span>:<input type="number" class="step-line-input" value="${step.line}" data-idx="${i}" min="1" style="width:50px;background:#45475a;border:1px solid #585b70;color:#cdd6f4;padding:1px 4px;border-radius:3px;font-size:11px;"></div>
         <div style="display:flex;gap:6px;font-size:11px;">
           ${i > 0 ? `<span class="step-move" data-idx="${i}" data-dir="up" style="cursor:pointer;color:#a6adc8;" title="Move up">\u25B2</span>` : ''}
           ${i < newTourSteps.length - 1 ? `<span class="step-move" data-idx="${i}" data-dir="down" style="cursor:pointer;color:#a6adc8;" title="Move down">\u25BC</span>` : ''}

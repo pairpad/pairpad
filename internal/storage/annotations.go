@@ -60,17 +60,3 @@ func (s *DB) DeleteAnnotation(id string) error {
 	return err
 }
 
-// CountAnnotations returns the number of annotations of a given type for a project.
-func (s *DB) CountAnnotations(projectID, annotationType string) (int, error) {
-	var count int
-	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM annotations WHERE project_id = ? AND type = ?`,
-		projectID, annotationType,
-	).Scan(&count)
-	return count, err
-}
-
-// Now returns the current time (for consistency in tests).
-func Now() time.Time {
-	return time.Now()
-}

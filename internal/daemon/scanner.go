@@ -4,11 +4,17 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pairpad/pairpad/internal/protocol"
 )
 
 const maxFileSize = 5 * 1024 * 1024 // 5MB
+
+// isWithinDir checks that absPath is within the given directory.
+func isWithinDir(absPath, dir string) bool {
+	return strings.HasPrefix(absPath, dir+string(filepath.Separator)) || absPath == dir
+}
 
 // scanTree walks the project directory and returns a list of file entries,
 // respecting ignore patterns and the file size limit.
@@ -64,6 +70,9 @@ func readFile(projectDir, relPath string, ignore *ignoreMatcher) ([]byte, error)
 	}
 
 	absPath := filepath.Join(projectDir, relPath)
+	if !isWithinDir(absPath, projectDir) {
+		return nil, fs.ErrPermission
+	}
 
 	info, err := os.Stat(absPath)
 	if err != nil {
@@ -84,6 +93,9 @@ func writeFile(projectDir, relPath string, content []byte, ignore *ignoreMatcher
 	}
 
 	absPath := filepath.Join(projectDir, relPath)
+	if !isWithinDir(absPath, projectDir) {
+		return fs.ErrPermission
+	}
 
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return err

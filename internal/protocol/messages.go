@@ -20,12 +20,9 @@ const (
 
 	// Server → Daemon
 	TypeSessionReady    MessageType = "session_ready"
-	TypeRequestFile     MessageType = "request_file"
-	TypeRequestComments MessageType = "request_comments"
-	TypeRequestTours    MessageType = "request_tours"
+	TypeRequestFile MessageType = "request_file"
 	TypeWriteFile   MessageType = "write_file"
 	TypeDeleteFile  MessageType = "delete_file"
-	TypeCreateFile  MessageType = "create_file"
 
 	// Browser → Server
 	TypeIdentify       MessageType = "identify"
@@ -45,7 +42,8 @@ const (
 	TypeSetRole        MessageType = "set_role"
 	TypeReanchor       MessageType = "reanchor"
 
-	// Server → Browser (relayed from daemon)
+	// Server → Browser
+	TypeYourColor       MessageType = "your_color"
 	TypeParticipantList MessageType = "participant_list"
 	TypeCursorState     MessageType = "cursor_state"
 	TypeCommentList     MessageType = "comment_list"
@@ -120,12 +118,6 @@ type WriteFile struct {
 // DeleteFile is sent by the server to tell the daemon to delete a file.
 type DeleteFile struct {
 	Path string `json:"path"`
-}
-
-// CreateFile is sent by the server to tell the daemon to create a new file.
-type CreateFile struct {
-	Path    string `json:"path"`
-	Content []byte `json:"content"`
 }
 
 // OpenFile is sent by a browser client when it opens a file in the editor.
