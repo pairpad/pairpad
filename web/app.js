@@ -1758,6 +1758,145 @@ function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// --- Quick file picker (Ctrl+P) ---
+
+let filePickerActive = false;
+let filePickerIndex = 0;
+let filePickerMatches = [];
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+    e.preventDefault();
+    if (filePickerActive) {
+      closeFilePicker();
+    } else {
+      openFilePicker();
+    }
+  }
+  if (e.key === 'Escape' && filePickerActive) {
+    closeFilePicker();
+  }
+});
+
+function openFilePicker() {
+  filePickerActive = true;
+  filePickerIndex = 0;
+  const overlay = document.getElementById('file-picker-overlay');
+  overlay.style.display = 'flex';
+  const input = document.getElementById('file-picker-input');
+  input.value = '';
+  input.focus();
+  updateFilePickerResults('');
+
+  input.oninput = () => {
+    filePickerIndex = 0;
+    updateFilePickerResults(input.value);
+  };
+
+  input.onkeydown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      filePickerIndex = Math.min(filePickerIndex + 1, filePickerMatches.length - 1);
+      renderFilePickerResults();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      filePickerIndex = Math.max(filePickerIndex - 1, 0);
+      renderFilePickerResults();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filePickerMatches[filePickerIndex]) {
+        openFile(filePickerMatches[filePickerIndex].path);
+        closeFilePicker();
+      }
+    }
+  };
+}
+
+function closeFilePicker() {
+  filePickerActive = false;
+  document.getElementById('file-picker-overlay').style.display = 'none';
+}
+
+function updateFilePickerResults(query) {
+  const files = fileTreeEntries.filter(f => !f.is_dir);
+  if (!query) {
+    filePickerMatches = files.slice(0, 50);
+  } else {
+    const lower = query.toLowerCase();
+    filePickerMatches = files
+      .map(f => ({ ...f, score: fuzzyScore(f.path.toLowerCase(), lower) }))
+      .filter(f => f.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 50);
+  }
+  renderFilePickerResults();
+}
+
+function renderFilePickerResults() {
+  const container = document.getElementById('file-picker-results');
+  container.innerHTML = '';
+  const query = document.getElementById('file-picker-input').value.toLowerCase();
+
+  for (let i = 0; i < filePickerMatches.length; i++) {
+    const item = document.createElement('div');
+    item.className = `file-picker-item${i === filePickerIndex ? ' active' : ''}`;
+    if (query) {
+      item.innerHTML = highlightMatch(filePickerMatches[i].path, query);
+    } else {
+      item.textContent = filePickerMatches[i].path;
+    }
+    const idx = i;
+    item.addEventListener('click', () => {
+      openFile(filePickerMatches[idx].path);
+      closeFilePicker();
+    });
+    item.addEventListener('mouseenter', () => {
+      filePickerIndex = idx;
+      renderFilePickerResults();
+    });
+    container.appendChild(item);
+  }
+
+  // Scroll active item into view
+  const active = container.querySelector('.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function fuzzyScore(str, query) {
+  let si = 0, qi = 0, score = 0;
+  while (si < str.length && qi < query.length) {
+    if (str[si] === query[qi]) {
+      score++;
+      // Bonus for consecutive matches
+      if (si > 0 && str[si - 1] === query[qi - 1]) score++;
+      // Bonus for matching after separator
+      if (si === 0 || str[si - 1] === '/' || str[si - 1] === '.') score += 2;
+      qi++;
+    }
+    si++;
+  }
+  return qi === query.length ? score : 0;
+}
+
+function highlightMatch(path, query) {
+  let result = '';
+  let qi = 0;
+  for (let si = 0; si < path.length && qi <= query.length; si++) {
+    if (qi < query.length && path[si].toLowerCase() === query[qi]) {
+      result += `<span class="file-picker-match">${escapeHtml(path[si])}</span>`;
+      qi++;
+    } else {
+      result += escapeHtml(path[si]);
+    }
+  }
+  return result;
+}
+
+// Close picker on overlay click
+document.getElementById('file-picker-overlay').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeFilePicker();
+});
+
 // --- Theme toggle ---
 
 window.toggleTheme = function() {
