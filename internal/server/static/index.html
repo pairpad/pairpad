@@ -238,7 +238,8 @@
       flex: 1;
       overflow: hidden;
     }
-    /* Unified marker gutter */
+    /* Gutters */
+    .cm-lineNumbers { cursor: pointer; }
     .cm-marker-gutter { width: 20px; cursor: pointer; }
     .cm-marker-gutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; }
 
@@ -534,6 +535,10 @@
       float: right;
     }
     .tour-step-edit .step-remove:hover { text-decoration: underline; }
+    .tour-step-edit.reanchoring {
+      outline: 1px solid #89b4fa;
+      outline-offset: -1px;
+    }
     .tour-create-hint {
       color: #585b70;
       font-size: 11px;

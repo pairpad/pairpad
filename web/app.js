@@ -1319,6 +1319,7 @@ function showTourCreationPanel(title, desc) {
 window.cancelTourCreation = function() {
   creatingTour = false;
   editingTourId = null;
+  reanchoringStepIdx = null;
   newTourSteps = [];
   document.getElementById('tour-create-panel').style.display = 'none';
   document.getElementById('tour-select').style.display = '';
@@ -1332,6 +1333,16 @@ window.addTourStepAtLine = function(line) {
   const file = getCurrentPath();
   if (!file) return;
 
+  // If re-anchoring an existing step, update it instead of adding
+  if (reanchoringStepIdx !== null && reanchoringStepIdx < newTourSteps.length) {
+    newTourSteps[reanchoringStepIdx].file = file;
+    newTourSteps[reanchoringStepIdx].line = line;
+    reanchoringStepIdx = null;
+    renderNewTourSteps();
+    refreshCreationMarkers();
+    return;
+  }
+
   newTourSteps.push({ file, line, title: '', description: '' });
   renderNewTourSteps();
   refreshCreationMarkers();
@@ -1344,6 +1355,8 @@ window.addTourStepAtLine = function(line) {
   }
 };
 
+let reanchoringStepIdx = null; // index of step being re-anchored via gutter click
+
 function renderNewTourSteps() {
   const container = document.getElementById('new-tour-steps');
   if (!container) return;
@@ -1353,9 +1366,17 @@ function renderNewTourSteps() {
     const step = newTourSteps[i];
     const div = document.createElement('div');
     div.className = 'tour-step-edit';
+    if (reanchoringStepIdx === i) div.classList.add('reanchoring');
     div.innerHTML = `
-      <span class="step-remove" data-idx="${i}">remove</span>
-      <div class="step-location">${i + 1}. ${step.file.split('/').pop()}:${step.line}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <div class="step-location"><span class="step-goto" data-idx="${i}" style="cursor:pointer;" title="Go to this step">${i + 1}. ${step.file.split('/').pop()}</span>:<input type="number" class="step-line-input" value="${step.line}" data-idx="${i}" min="1" style="width:50px;background:#45475a;border:1px solid #585b70;color:#cdd6f4;padding:1px 4px;border-radius:3px;font-size:11px;"></div>
+        <div style="display:flex;gap:6px;font-size:11px;">
+          ${i > 0 ? `<span class="step-move" data-idx="${i}" data-dir="up" style="cursor:pointer;color:#a6adc8;" title="Move up">\u25B2</span>` : ''}
+          ${i < newTourSteps.length - 1 ? `<span class="step-move" data-idx="${i}" data-dir="down" style="cursor:pointer;color:#a6adc8;" title="Move down">\u25BC</span>` : ''}
+          <span class="step-reanchor" data-idx="${i}" style="cursor:pointer;color:#89b4fa;">${reanchoringStepIdx === i ? 'click a line...' : 're-anchor'}</span>
+          <span class="step-remove" data-idx="${i}" style="cursor:pointer;color:#f38ba8;">remove</span>
+        </div>
+      </div>
       <input placeholder="Step title" value="${escapeAttr(step.title)}" data-idx="${i}" data-field="title">
       <textarea placeholder="Description" data-idx="${i}" data-field="description">${escapeHtml(step.description)}</textarea>
     `;
@@ -1370,12 +1391,66 @@ function renderNewTourSteps() {
       newTourSteps[idx][field] = e.target.value;
     });
   });
+  container.querySelectorAll('.step-line-input').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      const val = parseInt(e.target.value);
+      if (val > 0) {
+        newTourSteps[idx].line = val;
+        refreshCreationMarkers();
+      }
+    });
+  });
   container.querySelectorAll('.step-remove').forEach(el => {
     el.addEventListener('click', (e) => {
       const idx = parseInt(e.target.dataset.idx);
       newTourSteps.splice(idx, 1);
+      if (reanchoringStepIdx === idx) reanchoringStepIdx = null;
       renderNewTourSteps();
       refreshCreationMarkers();
+    });
+  });
+  container.querySelectorAll('.step-move').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      const dir = e.target.dataset.dir;
+      if (dir === 'up' && idx > 0) {
+        [newTourSteps[idx - 1], newTourSteps[idx]] = [newTourSteps[idx], newTourSteps[idx - 1]];
+      } else if (dir === 'down' && idx < newTourSteps.length - 1) {
+        [newTourSteps[idx], newTourSteps[idx + 1]] = [newTourSteps[idx + 1], newTourSteps[idx]];
+      }
+      renderNewTourSteps();
+      refreshCreationMarkers();
+    });
+  });
+  container.querySelectorAll('.step-goto').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      const step = newTourSteps[idx];
+      if (!step) return;
+      activeFile = step.file;
+      if (openFiles.has(step.file)) {
+        addTab(step.file);
+        openFileInEditor(step.file, openFiles.get(step.file));
+        activateTab(step.file);
+        scrollToLine(step.line);
+        setStatus(step.file);
+        requestAnimationFrame(() => refreshCreationMarkers());
+      } else {
+        pendingScroll = { file: step.file, line: step.line };
+        send('open_file', { path: step.file });
+      }
+    });
+  });
+  container.querySelectorAll('.step-reanchor').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      if (reanchoringStepIdx === idx) {
+        reanchoringStepIdx = null; // toggle off
+      } else {
+        reanchoringStepIdx = idx;
+      }
+      renderNewTourSteps();
     });
   });
 }

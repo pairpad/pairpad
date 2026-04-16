@@ -186,7 +186,7 @@
         },
         {
           "file": "internal/daemon/ignore.go",
-          "line": 58,
+          "line": 61,
           "title": "Path traversal prevention",
           "description": "Any relative path containing '..' is rejected. Combined with filepath.Join() for all file operations (which normalizes paths), this prevents directory traversal attacks. A browser client cannot request files outside the project directory."
         },
