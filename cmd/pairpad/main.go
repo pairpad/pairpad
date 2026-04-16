@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -78,7 +79,7 @@ func cmdRelay() {
 	addr := envOrDefault("PAIRPAD_ADDR", ":8080")
 	cfg := server.Config{
 		Addr:      addr,
-		DBPath:    envOrDefault("DATABASE_PATH", "pairpad.db"),
+		DBPath:    envOrDefault("DATABASE_PATH", defaultDBPath()),
 		PublicURL: envOrDefault("PAIRPAD_PUBLIC_URL", "http://localhost"+addr),
 	}
 
@@ -109,7 +110,7 @@ func cmdLocal() {
 	// Start the server in background
 	srvCfg := server.Config{
 		Addr:      addr,
-		DBPath:    envOrDefault("DATABASE_PATH", "pairpad.db"),
+		DBPath:    envOrDefault("DATABASE_PATH", defaultDBPath()),
 		PublicURL: publicURL,
 	}
 
@@ -157,6 +158,26 @@ func cmdLocal() {
 
 func cmdLogin() {
 	fmt.Println("pairpad: login not yet implemented")
+}
+
+func defaultDBPath() string {
+	// Follow XDG on Linux, standard paths on other platforms
+	dataDir := os.Getenv("XDG_DATA_HOME")
+	if dataDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "pairpad.db"
+		}
+		switch runtime.GOOS {
+		case "darwin":
+			dataDir = filepath.Join(home, "Library", "Application Support")
+		default:
+			dataDir = filepath.Join(home, ".local", "share")
+		}
+	}
+	dir := filepath.Join(dataDir, "pairpad")
+	os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "pairpad.db")
 }
 
 func envOrDefault(key, fallback string) string {

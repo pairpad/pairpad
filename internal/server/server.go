@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/pairpad/pairpad/internal/protocol"
+	"github.com/pairpad/pairpad/internal/storage"
 	"github.com/coder/websocket"
 )
 
@@ -31,14 +32,21 @@ type Config struct {
 // browser clients.
 type Server struct {
 	cfg      Config
+	store    *storage.DB
 	mu       sync.RWMutex
 	sessions map[string]*session
 }
 
 // New creates a new Server.
 func New(cfg Config) (*Server, error) {
+	store, err := storage.Open(cfg.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
 	return &Server{
 		cfg:      cfg,
+		store:    store,
 		sessions: make(map[string]*session),
 	}, nil
 }
@@ -94,6 +102,40 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("daemon connected, session %s", sessionID)
 
+	defer func() {
+		s.mu.Lock()
+		delete(s.sessions, sessionID)
+		s.mu.Unlock()
+		log.Printf("daemon disconnected, session %s", sessionID)
+	}()
+
+	// Wait for project_connect from daemon before sending session_ready
+	for {
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			return
+		}
+		env, err := protocol.Decode(data)
+		if err != nil {
+			continue
+		}
+		if env.Type == protocol.TypeProjectConnect {
+			var msg protocol.ProjectConnect
+			if err := protocol.DecodePayload(env, &msg); err == nil {
+				// Create or load the project in the database
+				_, err := s.store.GetOrCreateProject(msg.ProjectID, msg.Name, msg.RemoteURL)
+				if err != nil {
+					log.Printf("failed to load/create project: %v", err)
+				}
+				sess.mu.Lock()
+				sess.projectID = msg.ProjectID
+				sess.mu.Unlock()
+				log.Printf("session %s: project %s (%s)", sessionID, msg.Name, msg.ProjectID[:12])
+				break
+			}
+		}
+	}
+
 	// Send session_ready to daemon with the join URL and host token
 	joinURL := fmt.Sprintf("%s/#%s", s.cfg.PublicURL, sessionID)
 	readyData, err := protocol.Encode(protocol.TypeSessionReady, protocol.SessionReady{
@@ -104,13 +146,6 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		conn.Write(r.Context(), websocket.MessageText, readyData)
 	}
-
-	defer func() {
-		s.mu.Lock()
-		delete(s.sessions, sessionID)
-		s.mu.Unlock()
-		log.Printf("daemon disconnected, session %s", sessionID)
-	}()
 
 	// Read messages from daemon and relay to browsers
 	for {

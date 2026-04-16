@@ -29,6 +29,7 @@ type Daemon struct {
 	ignore   *ignoreMatcher
 	comments *commentStore
 	tours    *tourStore
+	project  projectInfo
 }
 
 // New creates a new Daemon with the given configuration.
@@ -48,11 +49,14 @@ func New(cfg Config) (*Daemon, error) {
 		return nil, fmt.Errorf("failed to initialize tour store: %w", err)
 	}
 
+	project := detectProject(cfg.ProjectDir)
+
 	return &Daemon{
 		cfg:      cfg,
 		ignore:   newIgnoreMatcher(cfg.ProjectDir),
 		comments: comments,
 		tours:    tours,
+		project:  project,
 	}, nil
 }
 
@@ -68,6 +72,16 @@ func (d *Daemon) Run() error {
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
+
+	// Identify the project
+	if err := d.send(ctx, conn, protocol.TypeProjectConnect, protocol.ProjectConnect{
+		ProjectID: d.project.ID,
+		Name:      d.project.Name,
+		RemoteURL: d.project.RemoteURL,
+	}); err != nil {
+		return fmt.Errorf("failed to send project identity: %w", err)
+	}
+	fmt.Printf("pairpad: project %s (%s)\n", d.project.Name, d.project.ID[:12])
 
 	// Send initial file tree
 	if err := d.sendFileTree(ctx, conn); err != nil {

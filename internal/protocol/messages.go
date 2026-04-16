@@ -11,7 +11,8 @@ type MessageType string
 
 const (
 	// Daemon → Server
-	TypeFileTree    MessageType = "file_tree"
+	TypeProjectConnect MessageType = "project_connect"
+	TypeFileTree       MessageType = "file_tree"
 	TypeFileContent MessageType = "file_content"
 	TypeFileChanged MessageType = "file_changed"
 	TypeFileCreated MessageType = "file_created"
@@ -54,6 +55,13 @@ const (
 	TypePong  MessageType = "pong"
 	TypeError MessageType = "error"
 )
+
+// ProjectConnect is sent by the daemon to identify which project it's serving.
+type ProjectConnect struct {
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+	RemoteURL string `json:"remote_url,omitempty"`
+}
 
 // Envelope wraps every WebSocket message with a type discriminator.
 type Envelope struct {

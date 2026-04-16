@@ -39,6 +39,7 @@ type participant struct {
 // and zero or more browser clients.
 type session struct {
 	id           string
+	projectID    string
 	mu           sync.RWMutex
 	daemon       *websocket.Conn
 	participants map[*websocket.Conn]*participant
