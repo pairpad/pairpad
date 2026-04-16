@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +8,7 @@ import (
 	"runtime"
 	"time"
 
+	flag "github.com/spf13/pflag"
 	"github.com/pairpad/pairpad/internal/daemon"
 	"github.com/pairpad/pairpad/internal/server"
 )
@@ -22,7 +22,6 @@ func main() {
 	}
 
 	cmd := os.Args[1]
-	// Strip the subcommand so flag.Parse sees the right args
 	os.Args = append(os.Args[:1], os.Args[2:]...)
 
 	switch cmd {
@@ -57,14 +56,14 @@ Commands:
   version     Print version information
   help        Show this help
 
-Run 'pairpad <command> -help' for details on each command.
+Run 'pairpad <command> --help' for details on each command.
 `)
 }
 
 func cmdLocal() {
 	fs := flag.NewFlagSet("local", flag.ExitOnError)
-	addr := fs.String("addr", envOrDefault("PAIRPAD_ADDR", ":8080"), "Relay listen address")
-	dir := fs.String("dir", ".", "Project directory")
+	addr := fs.StringP("addr", "a", envOrDefault("PAIRPAD_ADDR", ":8080"), "Relay listen address")
+	dir := fs.StringP("dir", "d", ".", "Project directory")
 	noBrowser := fs.Bool("no-browser", false, "Don't open browser automatically")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Run relay + daemon together in one process. Zero configuration needed.
@@ -130,8 +129,8 @@ Flags:
 
 func cmdConnect() {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
-	serverURL := fs.String("server", envOrDefault("PAIRPAD_SERVER", "ws://localhost:8080"), "Relay server URL")
-	dir := fs.String("dir", ".", "Project directory")
+	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "ws://localhost:8080"), "Relay server URL")
+	dir := fs.StringP("dir", "d", ".", "Project directory")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Connect this project to a remote relay server.
 
@@ -166,7 +165,7 @@ Flags:
 
 func cmdRelay() {
 	fs := flag.NewFlagSet("relay", flag.ExitOnError)
-	addr := fs.String("addr", envOrDefault("PAIRPAD_ADDR", ":8080"), "Listen address")
+	addr := fs.StringP("addr", "a", envOrDefault("PAIRPAD_ADDR", ":8080"), "Listen address")
 	dbPath := fs.String("db", envOrDefault("DATABASE_PATH", defaultDBPath()), "SQLite database path")
 	publicURL := fs.String("public-url", "", "Public URL for session links (default: http://localhost:<port>)")
 	fs.Usage = func() {
