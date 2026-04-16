@@ -1237,7 +1237,7 @@ function handleTourList(tours) {
   allTours = tours;
   const btn = document.getElementById('tour-toggle-btn');
   if (btn) {
-    btn.style.display = tours.length > 0 ? '' : 'none';
+    btn.style.display = '';
   }
   // Refresh the dropdown if tour bar is visible
   const bar = document.getElementById('tour-bar');

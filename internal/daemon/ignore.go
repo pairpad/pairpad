@@ -13,7 +13,6 @@ var hardDenyPatterns = []string{
 	".ssh",
 	".gnupg",
 	".git",
-	".pairpad",
 	"*.pem",
 	"*.key",
 	"*.tmp",

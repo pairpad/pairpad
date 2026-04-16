@@ -13,6 +13,9 @@ import (
 	"sync"
 	"syscall"
 
+	"time"
+
+	"github.com/pairpad/pairpad/internal/anchor"
 	"github.com/pairpad/pairpad/internal/protocol"
 	"github.com/pairpad/pairpad/internal/storage"
 	"github.com/coder/websocket"
@@ -171,16 +174,27 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypeFileContent:
-			// Route to the browser that requested it, not everyone
+			// Cache file content for anchor operations
 			var msg protocol.FileContent
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
+			sess.cacheFileContent(msg.Path, msg.Content)
+			// Route to the browser that requested it, not everyone
 			if requester := sess.resolveFileRequest(msg.Path); requester != nil {
 				requester.Write(r.Context(), websocket.MessageText, data)
 			}
 
-		case protocol.TypeFileChanged, protocol.TypeFileCreated, protocol.TypeFileDeleted,
+		case protocol.TypeFileChanged, protocol.TypeFileCreated:
+			// Cache updated content, re-anchor, and broadcast to browsers
+			var msg protocol.FileContent
+			if err := protocol.DecodePayload(env, &msg); err == nil {
+				sess.cacheFileContent(msg.Path, msg.Content)
+				s.reanchorFile(r.Context(), sess, msg.Path)
+			}
+			sess.broadcastToBrowsers(r.Context(), data)
+
+		case protocol.TypeFileDeleted,
 			protocol.TypeCommentList, protocol.TypeTourList:
 			// Broadcast daemon-initiated changes to all browsers
 			sess.broadcastToBrowsers(r.Context(), data)
@@ -275,15 +289,8 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Ask daemon to send comments and tours (daemon broadcasts to all browsers)
-	reqComments, err := protocol.Encode(protocol.TypeRequestComments, nil)
-	if err == nil {
-		sess.writeToDaemon(r.Context(), reqComments)
-	}
-	reqTours, err := protocol.Encode(protocol.TypeRequestTours, nil)
-	if err == nil {
-		sess.writeToDaemon(r.Context(), reqTours)
-	}
+	// Send stored comments and tours from SQLite
+	s.sendAnnotations(r.Context(), conn, sess)
 
 	// If guide mode is active, send guide_start and latest guide_state to the new joiner
 	sess.mu.RLock()
@@ -357,7 +364,6 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if !sess.hasRole(conn, protocol.RoleCommenter) {
 				continue
 			}
-			// Inject author info and relay to daemon
 			var msg protocol.CommentAdd
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
@@ -366,18 +372,30 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if p == nil {
 				continue
 			}
-			msg.Author = p.name
-			msg.Color = p.color
-			relayData, err := protocol.Encode(protocol.TypeCommentAdd, msg)
-			if err == nil {
-				sess.writeToDaemon(r.Context(), relayData)
+			comment := protocol.Comment{
+				ID:        generateID(),
+				Author:    p.name,
+				Color:     p.color,
+				File:      msg.File,
+				Line:      msg.Line,
+				LineEnd:   msg.LineEnd,
+				Body:      msg.Body,
+				Timestamp: time.Now().UnixMilli(),
 			}
+			// Populate anchor from file cache
+			if lines := sess.getFileLines(msg.File); lines != nil {
+				anchor.PopulateComment(&comment, lines)
+			}
+			if err := s.store.SaveComment(sess.projectID, comment); err != nil {
+				log.Printf("failed to save comment: %v", err)
+				continue
+			}
+			s.broadcastComments(r.Context(), sess)
 
 		case protocol.TypeCommentReply:
 			if !sess.hasRole(conn, protocol.RoleCommenter) {
 				continue
 			}
-			// Inject author info and relay to daemon
 			var msg protocol.CommentReply
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
@@ -386,25 +404,80 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if p == nil {
 				continue
 			}
-			msg.Author = p.name
-			msg.Color = p.color
-			relayData, err := protocol.Encode(protocol.TypeCommentReply, msg)
-			if err == nil {
-				sess.writeToDaemon(r.Context(), relayData)
+			// Find parent comment to inherit file/line
+			comments, _ := s.store.GetComments(sess.projectID)
+			var parent *protocol.Comment
+			for i := range comments {
+				if comments[i].ID == msg.ParentID {
+					parent = &comments[i]
+					break
+				}
 			}
+			if parent == nil {
+				continue
+			}
+			reply := protocol.Comment{
+				ID:        generateID(),
+				ParentID:  msg.ParentID,
+				Author:    p.name,
+				Color:     p.color,
+				File:      parent.File,
+				Line:      parent.Line,
+				LineEnd:   parent.LineEnd,
+				Body:      msg.Body,
+				Timestamp: time.Now().UnixMilli(),
+			}
+			if err := s.store.SaveComment(sess.projectID, reply); err != nil {
+				log.Printf("failed to save reply: %v", err)
+				continue
+			}
+			s.broadcastComments(r.Context(), sess)
 
 		case protocol.TypeCommentResolve:
 			if !sess.hasRole(conn, protocol.RoleCommenter) {
 				continue
 			}
-			sess.writeToDaemon(r.Context(), data)
+			var msg protocol.CommentResolve
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			if err := s.store.ResolveComment(sess.projectID, msg.CommentID); err != nil {
+				log.Printf("failed to resolve comment: %v", err)
+			}
+			s.broadcastComments(r.Context(), sess)
 
-		case protocol.TypeTourSave, protocol.TypeTourDelete:
+		case protocol.TypeTourSave:
 			if !sess.hasRole(conn, protocol.RoleEditor) {
 				continue
 			}
-			// Relay to daemon for persistence
-			sess.writeToDaemon(r.Context(), data)
+			var tour protocol.Tour
+			if err := protocol.DecodePayload(env, &tour); err != nil {
+				continue
+			}
+			// Populate anchors from file cache
+			for i := range tour.Steps {
+				if lines := sess.getFileLines(tour.Steps[i].File); lines != nil {
+					anchor.PopulateTourStep(&tour.Steps[i], lines)
+				}
+			}
+			if err := s.store.SaveTour(sess.projectID, tour); err != nil {
+				log.Printf("failed to save tour: %v", err)
+				continue
+			}
+			s.broadcastTours(r.Context(), sess)
+
+		case protocol.TypeTourDelete:
+			if !sess.hasRole(conn, protocol.RoleEditor) {
+				continue
+			}
+			var msg protocol.TourDelete
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			if err := s.store.DeleteTour(msg.ID); err != nil {
+				log.Printf("failed to delete tour: %v", err)
+			}
+			s.broadcastTours(r.Context(), sess)
 
 		case protocol.TypeGuideStart:
 			if !sess.hasRole(conn, protocol.RoleHost) {
@@ -482,6 +555,66 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		default:
 			log.Printf("unhandled browser message: %s payload=%s", env.Type, string(env.Payload))
 		}
+	}
+}
+
+func (s *Server) sendAnnotations(ctx context.Context, conn *websocket.Conn, sess *session) {
+	comments, err := s.store.GetComments(sess.projectID)
+	if err == nil {
+		data, err := protocol.Encode(protocol.TypeCommentList, protocol.CommentList{Comments: comments})
+		if err == nil {
+			conn.Write(ctx, websocket.MessageText, data)
+		}
+	}
+	tours, err := s.store.GetTours(sess.projectID)
+	if err == nil {
+		data, err := protocol.Encode(protocol.TypeTourList, protocol.TourList{Tours: tours})
+		if err == nil {
+			conn.Write(ctx, websocket.MessageText, data)
+		}
+	}
+}
+
+func (s *Server) broadcastComments(ctx context.Context, sess *session) {
+	comments, err := s.store.GetComments(sess.projectID)
+	if err != nil {
+		return
+	}
+	data, err := protocol.Encode(protocol.TypeCommentList, protocol.CommentList{Comments: comments})
+	if err == nil {
+		sess.broadcastToBrowsers(ctx, data)
+	}
+}
+
+func (s *Server) broadcastTours(ctx context.Context, sess *session) {
+	tours, err := s.store.GetTours(sess.projectID)
+	if err != nil {
+		return
+	}
+	data, err := protocol.Encode(protocol.TypeTourList, protocol.TourList{Tours: tours})
+	if err == nil {
+		sess.broadcastToBrowsers(ctx, data)
+	}
+}
+
+func (s *Server) reanchorFile(ctx context.Context, sess *session, file string) {
+	lines := sess.getFileLines(file)
+	if lines == nil {
+		return
+	}
+
+	// Re-anchor comments
+	comments, err := s.store.GetComments(sess.projectID)
+	if err == nil && anchor.ReanchorComments(comments, file, lines) {
+		s.store.UpdateComments(sess.projectID, comments)
+		s.broadcastComments(ctx, sess)
+	}
+
+	// Re-anchor tours
+	tours, err := s.store.GetTours(sess.projectID)
+	if err == nil && anchor.ReanchorTourSteps(tours, file, lines) {
+		s.store.UpdateTours(sess.projectID, tours)
+		s.broadcastTours(ctx, sess)
 	}
 }
 

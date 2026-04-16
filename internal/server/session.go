@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/pairpad/pairpad/internal/protocol"
@@ -53,6 +54,9 @@ type session struct {
 	// pendingFiles tracks which browser requested which file, so
 	// file_content responses are routed only to the requester.
 	pendingFiles map[string]*websocket.Conn // path -> requesting conn
+	// fileCache stores latest file contents for anchor operations.
+	// Transient — gone when session ends.
+	fileCache    map[string][]byte // path -> content
 }
 
 func newSession(id string, daemon *websocket.Conn, hostToken string) *session {
@@ -62,6 +66,7 @@ func newSession(id string, daemon *websocket.Conn, hostToken string) *session {
 		hostToken:    hostToken,
 		participants:  make(map[*websocket.Conn]*participant),
 		pendingFiles: make(map[string]*websocket.Conn),
+		fileCache:    make(map[string][]byte),
 	}
 }
 
@@ -200,6 +205,22 @@ func (s *session) resolveFileRequest(path string) *websocket.Conn {
 		delete(s.pendingFiles, path)
 	}
 	return conn
+}
+
+func (s *session) cacheFileContent(path string, content []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fileCache[path] = content
+}
+
+func (s *session) getFileLines(path string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	content, ok := s.fileCache[path]
+	if !ok {
+		return nil
+	}
+	return strings.Split(string(content), "\n")
 }
 
 func (s *session) setFileTree(files []protocol.FileEntry) {
