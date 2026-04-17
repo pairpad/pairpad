@@ -461,6 +461,19 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 			s.broadcastComments(r.Context(), sess)
 
+		case protocol.TypeCommentDelete:
+			if !sess.hasRole(conn, protocol.RoleCommenter) {
+				continue
+			}
+			var msg protocol.CommentDelete
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			if err := s.store.DeleteComment(sess.projectID, msg.CommentID); err != nil {
+				log.Printf("failed to delete comment: %v", err)
+			}
+			s.broadcastComments(r.Context(), sess)
+
 		case protocol.TypeTourSave:
 			if !sess.hasRole(conn, protocol.RoleEditor) {
 				continue

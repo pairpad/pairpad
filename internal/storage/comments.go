@@ -57,6 +57,23 @@ func (s *DB) ResolveComment(projectID, commentID string) error {
 	return nil
 }
 
+// DeleteComment removes a comment and all its replies.
+func (s *DB) DeleteComment(projectID, commentID string) error {
+	comments, err := s.GetComments(projectID)
+	if err != nil {
+		return err
+	}
+	// Delete the comment and any replies to it
+	for _, c := range comments {
+		if c.ID == commentID || c.ParentID == commentID {
+			if err := s.DeleteAnnotation(c.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // UpdateComments bulk-updates all comments for a project (used by re-anchoring).
 func (s *DB) UpdateComments(projectID string, comments []protocol.Comment) error {
 	for _, c := range comments {

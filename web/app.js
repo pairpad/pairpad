@@ -96,16 +96,7 @@ window.joinSession = function() {
     setOnCursorChange(() => {
       clearTimeout(cursorTimer);
       cursorTimer = setTimeout(() => {
-        const file = getCurrentPath();
-        if (file) {
-          const sel = getSelectionLines();
-          send('cursor_update', {
-            file,
-            line: getCursorLine(),
-            selection_from: sel ? sel.from : 0,
-            selection_to: sel ? sel.to : 0,
-          });
-        }
+        sendCursorUpdate();
         broadcastGuideState();
       }, 50);
 
@@ -177,7 +168,9 @@ function handleMessage(envelope) {
       addTab(payload.path);
       openFileInEditor(payload.path, content);
       activateTab(payload.path);
+      highlightFileInTree(payload.path);
       setStatus(payload.path);
+      sendCursorUpdate();
       // Handle pending scroll from jumpToParticipant
       if (pendingScroll && pendingScroll.file === payload.path) {
         scrollToLine(pendingScroll.line);
@@ -489,6 +482,28 @@ function reanchorAnnotationsForFile(file) {
   }
 }
 
+function updateCommentToggleBadge() {
+  const btn = document.getElementById('comment-toggle-btn');
+  if (!btn) return;
+  const unresolvedCount = comments.filter(c => !c.parent_id && !c.resolved).length;
+  // Update badge
+  let badge = btn.querySelector('.badge');
+  if (unresolvedCount > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'badge';
+      btn.appendChild(badge);
+    }
+    badge.textContent = unresolvedCount;
+  } else if (badge) {
+    badge.remove();
+  }
+  // Auto-open sidebar when project has comments (first load)
+  if (unresolvedCount > 0 && !document.getElementById('comment-sidebar').classList.contains('was-toggled')) {
+    document.getElementById('comment-sidebar').classList.remove('hidden');
+  }
+}
+
 // --- Roles ---
 
 function showRoleMenu(targetName, currentRole, anchorEl) {
@@ -588,6 +603,17 @@ function renderFileTree(files) {
   const container = document.getElementById('file-tree');
   container.innerHTML = '';
   renderTreeNode(root, container, 0);
+
+  // Re-apply decorations after tree rebuild
+  renderFileTreePresence();
+  renderFileTreeCommentBadges();
+  renderTourFileTreeIndicators();
+
+  // Re-highlight active file
+  if (activeFile) {
+    const item = document.querySelector(`.tree-item[data-file-path="${CSS.escape(activeFile)}"]`);
+    if (item) item.classList.add('active');
+  }
 }
 
 function renderTreeNode(node, container, depth) {
@@ -649,15 +675,43 @@ function renderTreeNode(node, container, depth) {
   }
 }
 
+function highlightFileInTree(path) {
+  // Expand parent directories to reveal the file
+  const parts = path.split('/');
+  let needsRerender = false;
+  for (let i = 1; i < parts.length; i++) {
+    const dirPath = parts.slice(0, i).join('/');
+    if (collapsedDirs.has(dirPath)) {
+      collapsedDirs.delete(dirPath);
+      needsRerender = true;
+    }
+  }
+
+  if (needsRerender) {
+    renderFileTree(fileTreeEntries);
+  } else {
+    // Just update the highlight without full re-render
+    document.querySelectorAll('.tree-item.active').forEach(el => el.classList.remove('active'));
+    const item = document.querySelector(`.tree-item[data-file-path="${CSS.escape(path)}"]`);
+    if (item) item.classList.add('active');
+  }
+
+  // Scroll the active file into view
+  const item = document.querySelector(`.tree-item[data-file-path="${CSS.escape(path)}"]`);
+  if (item) item.scrollIntoView({ block: 'nearest' });
+}
+
 // --- File operations ---
 
 function openFile(path) {
   activeFile = path;
+  highlightFileInTree(path);
   if (openFiles.has(path)) {
     addTab(path);
     openFileInEditor(path, openFiles.get(path));
     activateTab(path);
     setStatus(path);
+    sendCursorUpdate();
     requestAnimationFrame(() => {
       refreshCommentGutter();
       renderPeerSelections();
@@ -666,6 +720,18 @@ function openFile(path) {
   } else {
     send('open_file', { path });
   }
+}
+
+function sendCursorUpdate() {
+  const file = getCurrentPath();
+  if (!file) return;
+  const sel = getSelectionLines();
+  send('cursor_update', {
+    file,
+    line: getCursorLine(),
+    selection_from: sel ? sel.from : 0,
+    selection_to: sel ? sel.to : 0,
+  });
 }
 
 // --- Tabs ---
@@ -695,10 +761,12 @@ function addTab(path) {
     tab.addEventListener('click', () => {
       activeFile = path;
       activateTab(path);
+      highlightFileInTree(path);
       if (openFiles.has(path)) {
         openFileInEditor(path, openFiles.get(path));
       }
       setStatus(path);
+      sendCursorUpdate();
       refreshCommentGutter();
       broadcastGuideState();
     });
@@ -807,6 +875,12 @@ function handleCommentList(newComments) {
   renderCommentFeed();
   renderFileTreeCommentBadges();
   refreshCommentGutter();
+  updateCommentToggleBadge();
+
+  // Auto-close sidebar when all comments are deleted
+  if (comments.length === 0) {
+    document.getElementById('comment-sidebar').classList.add('hidden');
+  }
 }
 
 function renderCommentFeed() {
@@ -872,6 +946,16 @@ function renderCommentFeed() {
       send('comment_resolve', { comment_id: root.id });
     });
     actions.appendChild(resolveBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.style.color = 'var(--error)';
+    deleteBtn.addEventListener('click', () => {
+      if (confirm('Delete this comment and all replies?')) {
+        send('comment_delete', { comment_id: root.id });
+      }
+    });
+    actions.appendChild(deleteBtn);
 
     thread.appendChild(actions);
 
@@ -1024,6 +1108,7 @@ window.addCommentAtLine = function(line, lineEnd) {
 window.toggleCommentSidebar = function() {
   const sidebar = document.getElementById('comment-sidebar');
   sidebar.classList.toggle('hidden');
+  sidebar.classList.add('was-toggled');
 };
 
 // File tree comment badges

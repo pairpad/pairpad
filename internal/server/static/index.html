@@ -326,6 +326,11 @@
 
     /* Gutters */
     .cm-lineNumbers { cursor: pointer; }
+    .cm-lineNumbers .cm-gutterElement:hover {
+      color: var(--accent);
+      background: var(--bg-hover);
+      border-radius: 2px;
+    }
     .cm-marker-gutter { width: 20px; cursor: pointer; }
     .cm-marker-gutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; }
 
@@ -339,6 +344,15 @@
       flex-shrink: 0;
     }
     #comment-sidebar.hidden { display: none; }
+    #comment-toggle-btn .badge {
+      background: var(--accent);
+      color: var(--bg-primary);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 0 5px;
+      border-radius: 8px;
+      margin-left: 4px;
+    }
     #comment-header {
       padding: 10px 12px;
       font-size: 11px;
@@ -778,7 +792,7 @@
         <div id="editor-container"></div>
         <button id="comment-toggle-btn" onclick="toggleCommentSidebar()">Comments</button>
       </div>
-      <div id="comment-sidebar">
+      <div id="comment-sidebar" class="hidden">
         <div id="comment-header">
           <span>Comments</span>
           <span class="toggle-btn" onclick="toggleCommentSidebar()">&times;</span>

@@ -321,6 +321,7 @@ export function openFileInEditor(path, content) {
     view.setState(fileStates.get(path));
     // Clear stale markers — they'll be repopulated by requestAnimationFrame
     clearAllMarkers();
+    view.focus();
     return;
   }
 
@@ -335,6 +336,7 @@ export function openFileInEditor(path, content) {
   });
 
   view.setState(state);
+  view.focus();
 }
 
 function clearAllMarkers() {

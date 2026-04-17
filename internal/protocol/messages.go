@@ -33,6 +33,7 @@ const (
 	TypeCommentAdd     MessageType = "comment_add"
 	TypeCommentReply   MessageType = "comment_reply"
 	TypeCommentResolve MessageType = "comment_resolve"
+	TypeCommentDelete  MessageType = "comment_delete"
 	TypeTourSave       MessageType = "tour_save"
 	TypeTourDelete     MessageType = "tour_delete"
 	TypeGuideStart     MessageType = "guide_start"
@@ -217,6 +218,11 @@ type CommentReply struct {
 
 // CommentResolve is sent by a browser to resolve/unresolve a comment thread.
 type CommentResolve struct {
+	CommentID string `json:"comment_id"`
+}
+
+// CommentDelete is sent by a browser to delete a comment and its replies.
+type CommentDelete struct {
 	CommentID string `json:"comment_id"`
 }
 
