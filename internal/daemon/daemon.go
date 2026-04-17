@@ -145,7 +145,7 @@ func (d *Daemon) connectAndServe(ctx context.Context, events <-chan watcherEvent
 				return nil
 			}
 			if err := d.handleFSEvent(ctx, conn, event); err != nil {
-				log.Printf("error handling fs event: %v", err)
+				return err // connection likely dead, trigger reconnect
 			}
 
 		case err := <-errCh:

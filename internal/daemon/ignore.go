@@ -7,21 +7,38 @@ import (
 	"strings"
 )
 
-// hardDenyPatterns are never served regardless of configuration.
+// hardDenyPatterns are never served regardless of .gitignore configuration.
 var hardDenyPatterns = []string{
+	// Security — secrets and credentials
 	".env",
 	".ssh",
 	".gnupg",
-	".git",
 	"*.pem",
 	"*.key",
+	"*.p12",
+	"*.pfx",
+	".npmrc",
+	".pypirc",
+	".netrc",
+	".htpasswd",
+
+	// Version control
+	".git",
+
+	// Build artifacts and dependencies
+	"bin",
+	"node_modules",
+	"vendor",
+	"__pycache__",
+
+	// Editor and OS temp files
 	"*.tmp",
 	"*.temp",
 	"*.swp",
 	"*.swo",
 	"*~",
 	"tags",
-	"node_modules",
+	".DS_Store",
 }
 
 // ignoreMatcher determines whether a file path should be excluded.
