@@ -345,7 +345,26 @@ function decodeContent(b64) {
 
 let participants = [];
 
+let previousParticipantNames = new Set();
+
 function renderParticipants(list) {
+  const oldNames = previousParticipantNames;
+  const newNames = new Set(list.map(p => p.name));
+
+  // Detect joins/leaves (skip on initial load when oldNames is empty)
+  if (oldNames.size > 0) {
+    for (const p of list) {
+      if (!oldNames.has(p.name) && p.name !== userName) {
+        showJoinLeaveToast(p.name, 'joined');
+      }
+    }
+    for (const name of oldNames) {
+      if (!newNames.has(name) && name !== userName) {
+        showJoinLeaveToast(name, 'left');
+      }
+    }
+  }
+  previousParticipantNames = newNames;
   participants = list;
 
   // Track own role
@@ -621,6 +640,15 @@ function showRoleMenu(targetName, currentRole, anchorEl) {
     }
   };
   setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+function showJoinLeaveToast(name, action) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = `${name} ${action}`;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
 }
 
 function showRoleToast(role) {
@@ -939,11 +967,13 @@ function handleCommentList(newComments) {
   const oldComments = comments;
   comments = newComments;
 
-  // Detect new comments for toasts
+  // Detect new comments for toasts (skip on first load)
   const newIds = new Set(newComments.map(c => c.id));
-  for (const c of newComments) {
-    if (!previousCommentIds.has(c.id) && c.author !== userName && !c.parent_id) {
-      showToast(c);
+  if (previousCommentIds.size > 0) {
+    for (const c of newComments) {
+      if (!previousCommentIds.has(c.id) && c.author !== userName && !c.parent_id) {
+        showToast(c);
+      }
     }
   }
   previousCommentIds = newIds;
