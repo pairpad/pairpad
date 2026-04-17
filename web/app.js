@@ -245,6 +245,7 @@ function handleMessage(envelope) {
       openFileInEditor(payload.path, content);
       activateTab(payload.path);
       highlightFileInTree(payload.path);
+      updateBreadcrumb(payload.path);
       setStatus(payload.path);
       sendCursorUpdate();
       // Handle pending scroll from jumpToParticipant
@@ -779,6 +780,46 @@ function renderTreeNode(node, container, depth) {
   }
 }
 
+function updateBreadcrumb(path) {
+  const bar = document.getElementById('breadcrumb');
+  if (!path) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'block';
+  bar.innerHTML = '';
+
+  const parts = path.split('/');
+  for (let i = 0; i < parts.length; i++) {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'breadcrumb-sep';
+      sep.textContent = '/';
+      bar.appendChild(sep);
+    }
+
+    const span = document.createElement('span');
+    if (i < parts.length - 1) {
+      span.className = 'breadcrumb-dir';
+      const dirPath = parts.slice(0, i + 1).join('/');
+      span.textContent = parts[i];
+      span.addEventListener('click', () => {
+        // Toggle collapse of this directory in the file tree
+        if (collapsedDirs.has(dirPath)) {
+          collapsedDirs.delete(dirPath);
+        } else {
+          collapsedDirs.add(dirPath);
+        }
+        renderFileTree(fileTreeEntries);
+      });
+    } else {
+      span.className = 'breadcrumb-file';
+      span.textContent = parts[i];
+    }
+    bar.appendChild(span);
+  }
+}
+
 function highlightFileInTree(path) {
   // Expand parent directories to reveal the file
   const parts = path.split('/');
@@ -810,6 +851,7 @@ function highlightFileInTree(path) {
 function openFile(path) {
   activeFile = path;
   highlightFileInTree(path);
+  updateBreadcrumb(path);
   if (openFiles.has(path)) {
     addTab(path);
     openFileInEditor(path, openFiles.get(path));
@@ -866,6 +908,7 @@ function addTab(path) {
       activeFile = path;
       activateTab(path);
       highlightFileInTree(path);
+      updateBreadcrumb(path);
       if (openFiles.has(path)) {
         openFileInEditor(path, openFiles.get(path));
       }
