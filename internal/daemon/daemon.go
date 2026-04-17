@@ -24,12 +24,12 @@ type Config struct {
 
 // Daemon connects the local filesystem to the Pairpad server.
 type Daemon struct {
-	cfg            Config
-	ignore         *ignoreMatcher
-	project        projectInfo
-	sessionID      string
-	hostToken      string
-	everConnected  bool
+	cfg           Config
+	ignore        *ignoreMatcher
+	project       projectInfo
+	sessionID     string
+	hostToken     string
+	everConnected bool
 }
 
 // New creates a new Daemon with the given configuration.
@@ -85,7 +85,7 @@ func (d *Daemon) Run() error {
 			return fmt.Errorf("could not connect to relay at %s — is it running?", d.cfg.ServerURL)
 		}
 
-		log.Printf("lost connection to relay, reconnecting in 2s...")
+		fmt.Printf("pairpad: lost connection to relay, reconnecting...\n")
 		select {
 		case <-ctx.Done():
 			return nil
@@ -114,11 +114,18 @@ func (d *Daemon) connectAndServe(ctx context.Context, events <-chan watcherEvent
 	}
 	fmt.Printf("pairpad: project %s (session %s)\n", d.project.Name, d.sessionID[:12])
 
+	fmt.Printf("pairpad: loading project...\n")
+
 	// Send initial file tree
 	if err := d.sendFileTree(ctx, conn); err != nil {
 		return err
 	}
 
+	if d.everConnected {
+		fmt.Printf("pairpad: reconnected to relay\n")
+	} else {
+		fmt.Printf("pairpad: ready\n")
+	}
 	d.everConnected = true
 
 	// Handle incoming messages from server and outgoing FS events

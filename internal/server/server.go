@@ -177,8 +177,8 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 		conn.Write(r.Context(), websocket.MessageText, readyData)
 	}
 
-	// Notify browsers that daemon is connected
-	if statusData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: true}); err == nil {
+	// Notify browsers that daemon is reconnecting (file tree coming soon)
+	if statusData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: true, Loading: true}); err == nil {
 		sess.broadcastToBrowsers(r.Context(), statusData)
 	}
 
@@ -204,6 +204,10 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			sess.setFileTree(msg.Files)
 			// Relay to browsers
 			sess.broadcastToBrowsers(r.Context(), data)
+			// Signal that daemon is fully loaded
+			if readyData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: true}); err == nil {
+				sess.broadcastToBrowsers(r.Context(), readyData)
+			}
 
 		case protocol.TypeFileContent:
 			// Cache file content for anchor operations

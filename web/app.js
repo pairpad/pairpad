@@ -155,16 +155,24 @@ function handleMessage(envelope) {
   const payload = JSON.parse(atob(envelope.payload));
 
   switch (envelope.type) {
-    case 'daemon_status':
-      if (payload.connected) {
-        document.getElementById('reconnect-banner').style.display = 'none';
+    case 'daemon_status': {
+      const banner = document.getElementById('reconnect-banner');
+      if (payload.connected && payload.loading) {
+        banner.style.display = 'block';
+        banner.textContent = 'Host reconnecting, loading project...';
+        banner.style.background = 'var(--accent)';
+        setStatus('Loading...');
+      } else if (payload.connected) {
+        banner.style.display = 'none';
         setStatus('Connected');
       } else {
-        document.getElementById('reconnect-banner').style.display = 'block';
-        document.getElementById('reconnect-banner').textContent = 'Host disconnected. Waiting for reconnection...';
+        banner.style.display = 'block';
+        banner.textContent = 'Host disconnected. Waiting for reconnection...';
+        banner.style.background = 'var(--error)';
         setStatus('Host disconnected');
       }
       break;
+    }
     case 'your_color':
       myColor = payload.color;
       if (payload.project_name) {

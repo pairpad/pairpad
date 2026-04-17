@@ -318,6 +318,7 @@ type FollowStatus struct {
 // DaemonStatus is sent by the relay to browsers when the daemon connects/disconnects.
 type DaemonStatus struct {
 	Connected bool `json:"connected"`
+	Loading   bool `json:"loading,omitempty"`
 }
 
 // Reanchor is sent by the browser with corrected annotation positions
