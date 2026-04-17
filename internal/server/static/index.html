@@ -324,6 +324,18 @@
       color: var(--bg-primary);
     }
 
+    /* Reconnection banner */
+    #reconnect-banner {
+      display: none;
+      background: var(--error);
+      color: var(--bg-primary);
+      padding: 6px 16px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
     /* Gutters */
     .cm-lineNumbers { cursor: pointer; }
     .cm-lineNumbers .cm-gutterElement:hover {
@@ -763,6 +775,7 @@
         <button id="theme-btn" onclick="toggleTheme()" style="background:var(--bg-hover);border:1px solid var(--border-input);color:var(--text-secondary);padding:3px 8px;border-radius:4px;font-size:13px;cursor:pointer;" title="Toggle light/dark theme"></button>
       </div>
     </div>
+    <div id="reconnect-banner">Connection lost. Reconnecting...</div>
     <div id="workspace">
       <div id="sidebar">
         <div id="sidebar-header">Explorer</div>

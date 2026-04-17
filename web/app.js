@@ -117,7 +117,10 @@ window.joinSession = function() {
 
   ws.onclose = (e) => {
     if (document.getElementById('ide').style.display === 'flex') {
-      setStatus('Disconnected — session ended or daemon stopped. Reload to reconnect.');
+      // Already in a session — try to reconnect
+      document.getElementById('reconnect-banner').style.display = 'block';
+      setStatus('Reconnecting...');
+      setTimeout(() => reconnect(), 2000);
     } else {
       err.textContent = e.code === 1006
         ? 'Could not connect to relay. Is it running?'
@@ -152,6 +155,16 @@ function handleMessage(envelope) {
   const payload = JSON.parse(atob(envelope.payload));
 
   switch (envelope.type) {
+    case 'daemon_status':
+      if (payload.connected) {
+        document.getElementById('reconnect-banner').style.display = 'none';
+        setStatus('Connected');
+      } else {
+        document.getElementById('reconnect-banner').style.display = 'block';
+        document.getElementById('reconnect-banner').textContent = 'Host disconnected. Waiting for reconnection...';
+        setStatus('Host disconnected');
+      }
+      break;
     case 'your_color':
       myColor = payload.color;
       if (payload.project_name) {
@@ -1841,6 +1854,41 @@ function escapeAttr(s) {
 }
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// --- Reconnection ---
+
+function reconnect() {
+  const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = `${wsProtocol}//${location.host}/ws/browser?session=${sessionId}`;
+
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    // Re-identify
+    const identifyMsg = { name: userName };
+    if (hostToken) identifyMsg.host_token = hostToken;
+    send('identify', identifyMsg);
+    document.getElementById('reconnect-banner').style.display = 'none';
+    setStatus('Reconnected');
+    sendCursorUpdate();
+  };
+
+  ws.onclose = () => {
+    document.getElementById('reconnect-banner').style.display = 'block';
+    setStatus('Reconnecting...');
+    setTimeout(() => reconnect(), 2000);
+  };
+
+  ws.onerror = () => {};
+
+  ws.onmessage = (event) => {
+    try {
+      handleMessage(JSON.parse(event.data));
+    } catch (e) {
+      console.error('Failed to handle message:', e);
+    }
+  };
 }
 
 // --- Quick file picker (Ctrl+P) ---

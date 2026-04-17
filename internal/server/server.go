@@ -95,24 +95,8 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	defer conn.CloseNow()
 	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
-	sessionID := generateID()
-	hostToken := generateID()
-	sess := newSession(sessionID, conn, hostToken)
-
-	s.mu.Lock()
-	s.sessions[sessionID] = sess
-	s.mu.Unlock()
-
-	log.Printf("daemon connected, session %s", sessionID)
-
-	defer func() {
-		s.mu.Lock()
-		delete(s.sessions, sessionID)
-		s.mu.Unlock()
-		log.Printf("daemon disconnected, session %s", sessionID)
-	}()
-
-	// Wait for project_connect from daemon before sending session_ready
+	// Wait for project_connect from daemon to get session ID
+	var msg protocol.ProjectConnect
 	for {
 		_, data, err := conn.Read(r.Context())
 		if err != nil {
@@ -123,24 +107,67 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if env.Type == protocol.TypeProjectConnect {
-			var msg protocol.ProjectConnect
 			if err := protocol.DecodePayload(env, &msg); err == nil {
-				// Create or load the project in the database
-				_, err := s.store.GetOrCreateProject(msg.ProjectID, msg.Name, msg.RemoteURL)
-				if err != nil {
-					log.Printf("failed to load/create project: %v", err)
-				}
-				sess.mu.Lock()
-				sess.projectID = msg.ProjectID
-				sess.mu.Unlock()
-				log.Printf("session %s: project %s (%s)", sessionID, msg.Name, msg.ProjectID[:12])
 				break
 			}
 		}
 	}
 
+	// Use the daemon-provided session ID
+	sessionID := msg.SessionID
+
+	// Create or load the project
+	if _, err := s.store.GetOrCreateProject(msg.ProjectID, msg.Name, msg.RemoteURL); err != nil {
+		log.Printf("failed to load/create project: %v", err)
+	}
+
+	// Check if this session already exists (daemon reconnecting)
+	s.mu.Lock()
+	sess, reconnecting := s.sessions[sessionID]
+	if reconnecting {
+		// Reconnection: update daemon connection, keep existing state
+		sess.mu.Lock()
+		sess.daemon = conn
+		sess.mu.Unlock()
+		log.Printf("daemon reconnected, session %s (project %s)", sessionID, msg.Name)
+	} else {
+		// New session — use daemon-provided host token
+		sess = newSession(sessionID, conn, msg.HostToken)
+		sess.projectID = msg.ProjectID
+		s.sessions[sessionID] = sess
+		log.Printf("daemon connected, session %s (project %s)", sessionID, msg.Name)
+	}
+	s.mu.Unlock()
+
+	defer func() {
+		// Don't delete the session immediately — keep it for 60 seconds
+		// in case the daemon reconnects
+		go func() {
+			time.Sleep(60 * time.Second)
+			s.mu.Lock()
+			if sess, ok := s.sessions[sessionID]; ok {
+				sess.mu.RLock()
+				daemonGone := sess.daemon == conn // still our old conn
+				sess.mu.RUnlock()
+				if daemonGone {
+					delete(s.sessions, sessionID)
+					log.Printf("session %s expired (daemon did not reconnect)", sessionID)
+				}
+			}
+			s.mu.Unlock()
+		}()
+		log.Printf("daemon disconnected, session %s (keeping for 60s)", sessionID)
+		// Notify browsers that daemon is gone
+		if statusData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: false}); err == nil {
+			sess.broadcastToBrowsers(r.Context(), statusData)
+		}
+	}()
+
 	// Send session_ready to daemon with the join URL and host token
 	joinURL := fmt.Sprintf("%s/#%s", s.cfg.PublicURL, sessionID)
+	sess.mu.RLock()
+	hostToken := sess.hostToken
+	sess.mu.RUnlock()
 	readyData, err := protocol.Encode(protocol.TypeSessionReady, protocol.SessionReady{
 		SessionID: sessionID,
 		JoinURL:   joinURL,
@@ -148,6 +175,11 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	})
 	if err == nil {
 		conn.Write(r.Context(), websocket.MessageText, readyData)
+	}
+
+	// Notify browsers that daemon is connected
+	if statusData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: true}); err == nil {
+		sess.broadcastToBrowsers(r.Context(), statusData)
 	}
 
 	// Read messages from daemon and relay to browsers

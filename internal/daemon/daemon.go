@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/pairpad/pairpad/internal/protocol"
 	"github.com/coder/websocket"
@@ -16,14 +17,18 @@ import (
 type Config struct {
 	ProjectDir string
 	ServerURL  string
+	NewSession bool                 // force a new session (ignore saved session ID)
 	OnReady    func(joinURL string) // called when session is ready (optional)
 }
 
 // Daemon connects the local filesystem to the Pairpad server.
 type Daemon struct {
-	cfg     Config
-	ignore  *ignoreMatcher
-	project projectInfo
+	cfg            Config
+	ignore         *ignoreMatcher
+	project        projectInfo
+	sessionID      string
+	hostToken      string
+	everConnected  bool
 }
 
 // New creates a new Daemon with the given configuration.
@@ -34,47 +39,80 @@ func New(cfg Config) (*Daemon, error) {
 	}
 
 	project := detectProject(cfg.ProjectDir)
+	sessionID, hostToken := loadSession(project.ID, cfg.NewSession)
 
 	return &Daemon{
-		cfg:     cfg,
-		ignore:  newIgnoreMatcher(cfg.ProjectDir),
-		project: project,
+		cfg:       cfg,
+		ignore:    newIgnoreMatcher(cfg.ProjectDir),
+		project:   project,
+		sessionID: sessionID,
+		hostToken: hostToken,
 	}, nil
 }
 
-// Run starts the daemon: connects to the server, sends the file tree,
-// watches for local changes, and handles server requests.
+// Run starts the daemon with auto-reconnect. Connects to the relay,
+// sends project identity and file tree, and handles messages. On
+// disconnect, retries every 2 seconds until the context is cancelled.
 func (d *Daemon) Run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, d.cfg.ServerURL+"/ws/daemon", nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to server: %w", err)
-	}
-	defer conn.CloseNow()
-	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
-
-	// Identify the project
-	if err := d.send(ctx, conn, protocol.TypeProjectConnect, protocol.ProjectConnect{
-		ProjectID: d.project.ID,
-		Name:      d.project.Name,
-		RemoteURL: d.project.RemoteURL,
-	}); err != nil {
-		return fmt.Errorf("failed to send project identity: %w", err)
-	}
-	fmt.Printf("pairpad: project %s (%s)\n", d.project.Name, d.project.ID[:12])
-
-	// Send initial file tree
-	if err := d.sendFileTree(ctx, conn); err != nil {
-		return fmt.Errorf("failed to send file tree: %w", err)
-	}
-
-	// Start filesystem watcher
+	// Start filesystem watcher once (survives reconnects)
 	events, err := startWatcher(d.cfg.ProjectDir, d.ignore)
 	if err != nil {
 		return fmt.Errorf("failed to start watcher: %w", err)
 	}
+
+	d.everConnected = false
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+
+		err := d.connectAndServe(ctx, events)
+		if ctx.Err() != nil {
+			return nil // clean shutdown
+		}
+
+		if err != nil && !d.everConnected {
+			return fmt.Errorf("could not connect to relay at %s — is it running?", d.cfg.ServerURL)
+		}
+
+		log.Printf("lost connection to relay, reconnecting in 2s...")
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func (d *Daemon) connectAndServe(ctx context.Context, events <-chan watcherEvent) error {
+	conn, _, err := websocket.Dial(ctx, d.cfg.ServerURL+"/ws/daemon", nil)
+	if err != nil {
+		return err
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
+
+	// Identify the project and session
+	if err := d.send(ctx, conn, protocol.TypeProjectConnect, protocol.ProjectConnect{
+		ProjectID: d.project.ID,
+		SessionID: d.sessionID,
+		HostToken: d.hostToken,
+		Name:      d.project.Name,
+		RemoteURL: d.project.RemoteURL,
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("pairpad: project %s (session %s)\n", d.project.Name, d.sessionID[:12])
+
+	// Send initial file tree
+	if err := d.sendFileTree(ctx, conn); err != nil {
+		return err
+	}
+
+	d.everConnected = true
 
 	// Handle incoming messages from server and outgoing FS events
 	errCh := make(chan error, 1)

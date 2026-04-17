@@ -44,6 +44,7 @@ const (
 	TypeReanchor       MessageType = "reanchor"
 
 	// Server → Browser
+	TypeDaemonStatus    MessageType = "daemon_status"
 	TypeYourColor       MessageType = "your_color"
 	TypeParticipantList MessageType = "participant_list"
 	TypeCursorState     MessageType = "cursor_state"
@@ -59,6 +60,8 @@ const (
 // ProjectConnect is sent by the daemon to identify which project it's serving.
 type ProjectConnect struct {
 	ProjectID string `json:"project_id"`
+	SessionID string `json:"session_id"`
+	HostToken string `json:"host_token"`
 	Name      string `json:"name"`
 	RemoteURL string `json:"remote_url,omitempty"`
 }
@@ -310,6 +313,11 @@ type TourDelete struct {
 type FollowStatus struct {
 	Name      string `json:"name"`
 	Following bool   `json:"following"`
+}
+
+// DaemonStatus is sent by the relay to browsers when the daemon connects/disconnects.
+type DaemonStatus struct {
+	Connected bool `json:"connected"`
 }
 
 // Reanchor is sent by the browser with corrected annotation positions
