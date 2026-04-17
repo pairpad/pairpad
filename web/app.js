@@ -2144,13 +2144,24 @@ window.copySessionURL = function() {
 
 // --- Reconnection ---
 
+let reconnectAttempts = 0;
+const maxReconnectAttempts = 30; // give up after 60 seconds (30 * 2s)
+
 function reconnect() {
+  reconnectAttempts++;
+  if (reconnectAttempts > maxReconnectAttempts) {
+    document.getElementById('reconnect-banner').textContent = 'Session ended. Reload to start a new session.';
+    setStatus('Disconnected');
+    return;
+  }
+
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${wsProtocol}//${location.host}/ws/browser?session=${sessionId}`;
 
   ws = new WebSocket(url);
 
   ws.onopen = () => {
+    reconnectAttempts = 0;
     // Re-authenticate and re-identify
     if (sessionPassword || hostToken) {
       send('session_auth', {
@@ -2168,6 +2179,8 @@ function reconnect() {
 
   ws.onclose = () => {
     document.getElementById('reconnect-banner').style.display = 'block';
+    document.getElementById('reconnect-banner').textContent =
+      `Connection lost. Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`;
     setStatus('Reconnecting...');
     setTimeout(() => reconnect(), 2000);
   };

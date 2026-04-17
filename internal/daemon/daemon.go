@@ -128,15 +128,13 @@ func (d *Daemon) connectAndServe(ctx context.Context, events <-chan watcherEvent
 	}
 	fmt.Printf("pairpad: project %s (session %s)\n", d.project.Name, d.sessionID[:12])
 
-	fmt.Printf("pairpad: loading project...\n")
-
 	// Send initial file tree
 	if err := d.sendFileTree(ctx, conn); err != nil {
 		return err
 	}
 
 	if d.everConnected {
-		fmt.Printf("pairpad: reconnected to relay\n")
+		fmt.Printf("pairpad: reconnected\n")
 	} else {
 		fmt.Printf("pairpad: ready\n")
 	}
