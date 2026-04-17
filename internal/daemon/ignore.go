@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +48,7 @@ type ignoreMatcher struct {
 	patterns   []string
 	projectDir string
 	useGit     bool
+	gitIgnored map[string]bool // pre-computed set of git-ignored paths
 }
 
 // newIgnoreMatcher builds a matcher from .gitignore + .pairpadignore + hard deny list.
@@ -57,13 +59,60 @@ func newIgnoreMatcher(projectDir string) *ignoreMatcher {
 		patterns:   append([]string{}, hardDenyPatterns...),
 		projectDir: projectDir,
 		useGit:     isGitRepo(projectDir),
+		gitIgnored: make(map[string]bool),
 	}
 	// Load project .gitignore as a fallback for non-git projects
 	if !m.useGit {
 		m.loadFile(filepath.Join(projectDir, ".gitignore"))
 	}
 	m.loadFile(filepath.Join(projectDir, ".pairpadignore"))
+	// Pre-compute git-ignored paths in one batch
+	if m.useGit {
+		m.buildGitIgnoreSet()
+	}
 	return m
+}
+
+// buildGitIgnoreSet uses `git check-ignore --stdin` to batch-check all paths.
+func (m *ignoreMatcher) buildGitIgnoreSet() {
+	// Collect all paths
+	var paths []string
+	filepath.WalkDir(m.projectDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(m.projectDir, path)
+		if err != nil || rel == "." {
+			return nil
+		}
+		// Skip hard-denied dirs early to avoid walking into node_modules etc.
+		name := filepath.Base(rel)
+		for _, pattern := range hardDenyPatterns {
+			if matched, _ := filepath.Match(pattern, name); matched {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		paths = append(paths, rel)
+		return nil
+	})
+
+	if len(paths) == 0 {
+		return
+	}
+
+	cmd := exec.Command("git", "check-ignore", "--stdin")
+	cmd.Dir = m.projectDir
+	cmd.Stdin = strings.NewReader(strings.Join(paths, "\n"))
+	out, _ := cmd.Output()
+
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			m.gitIgnored[line] = true
+		}
+	}
 }
 
 func isGitRepo(dir string) bool {
@@ -119,14 +168,9 @@ func (m *ignoreMatcher) shouldIgnore(relPath string) bool {
 		}
 	}
 
-	// Use git check-ignore for accurate gitignore evaluation
-	// (handles global gitignore, negation, anchored patterns, etc.)
-	if m.useGit {
-		cmd := exec.Command("git", "check-ignore", "-q", relPath)
-		cmd.Dir = m.projectDir
-		if cmd.Run() == nil {
-			return true // git says ignore it
-		}
+	// Check pre-computed git ignore set
+	if m.useGit && m.gitIgnored[relPath] {
+		return true
 	}
 
 	return false
