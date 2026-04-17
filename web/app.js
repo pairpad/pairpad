@@ -109,6 +109,7 @@ window.joinSession = function() {
       cursorTimer = setTimeout(() => {
         sendCursorUpdate();
         broadcastGuideState();
+        checkUnsaved();
       }, 50);
 
       // Break away from following when user interacts manually
@@ -868,6 +869,24 @@ function openFile(path) {
   }
 }
 
+function checkUnsaved() {
+  const file = getCurrentPath();
+  if (!file) return;
+  const current = getEditorContent();
+  const saved = openFiles.get(file);
+  const unsaved = current !== null && saved !== undefined && current !== saved;
+  // Tab indicator
+  const tab = document.querySelector(`.tab[data-path="${CSS.escape(file)}"]`);
+  if (tab) {
+    tab.classList.toggle('unsaved', unsaved);
+  }
+  // File tree indicator (italic filename)
+  const treeItem = document.querySelector(`.tree-item[data-file-path="${CSS.escape(file)}"]`);
+  if (treeItem) {
+    treeItem.classList.toggle('tree-unsaved', unsaved);
+  }
+}
+
 function sendCursorUpdate() {
   const file = getCurrentPath();
   if (!file) return;
@@ -896,6 +915,10 @@ function addTab(path) {
     tab.appendChild(label);
 
     const close = document.createElement('span');
+    const dot = document.createElement('span');
+    dot.className = 'unsaved-dot';
+    tab.appendChild(dot);
+
     close.className = 'close';
     close.textContent = '\u00d7';
     close.addEventListener('click', (e) => {
@@ -972,6 +995,7 @@ function saveFile() {
   const encoded = btoa(new TextEncoder().encode(content).reduce((s, b) => s + String.fromCharCode(b), ''));
   send('save_file', { path: activeFile, content: encoded });
   setStatus(`Saved ${activeFile}`);
+  checkUnsaved();
 }
 
 // --- WebSocket send ---

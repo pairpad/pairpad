@@ -257,6 +257,15 @@
       background: var(--bg-primary);
       color: var(--text-primary);
     }
+    .tab .unsaved-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      display: none;
+      flex-shrink: 0;
+    }
+    .tab.unsaved .unsaved-dot { display: inline-block; }
+    .tab.unsaved .close { display: none; }
     .tab .close {
       font-size: 14px;
       opacity: 0;
@@ -600,6 +609,7 @@
       color: var(--text-secondary);
       line-height: 1.5;
     }
+    .tree-item.tree-unsaved .tree-label { font-style: italic; }
     .tree-tour-indicator {
       font-size: 9px;
       color: var(--accent);
