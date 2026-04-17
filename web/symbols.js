@@ -79,7 +79,7 @@ export function getSymbolAtLine(view, line) {
  * @param {string} symbolPath - e.g. "FunctionDeclaration:initDatabase"
  * @returns {number} Character position of the symbol start, or -1
  */
-export function findSymbol(view, symbolPath) {
+function findSymbol(view, symbolPath) {
   if (!view || !view.state || !symbolPath) return -1;
 
   const tree = ensureParsed(view.state);
