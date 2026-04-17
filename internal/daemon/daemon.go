@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -227,6 +230,14 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		}
 		return os.Remove(fmt.Sprintf("%s/%s", d.cfg.ProjectDir, msg.Path))
 
+	case protocol.TypeSearchRequest:
+		var msg protocol.SearchRequest
+		if err := protocol.DecodePayload(env, &msg); err != nil {
+			return err
+		}
+		results := d.searchFiles(msg.Query)
+		return d.send(ctx, conn, protocol.TypeSearchResults, results)
+
 	case protocol.TypeActivity:
 		var msg protocol.Activity
 		if err := protocol.DecodePayload(env, &msg); err == nil {
@@ -285,6 +296,64 @@ func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event 
 	}
 
 	return nil
+}
+
+const maxSearchResults = 100
+
+func (d *Daemon) searchFiles(query string) protocol.SearchResults {
+	if query == "" {
+		return protocol.SearchResults{}
+	}
+
+	var matches []protocol.SearchMatch
+	truncated := false
+	lowerQuery := strings.ToLower(query)
+
+	filepath.WalkDir(d.cfg.ProjectDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			rel, _ := filepath.Rel(d.cfg.ProjectDir, path)
+			if entry != nil && entry.IsDir() && rel != "." && d.ignore.shouldIgnore(rel) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		rel, err := filepath.Rel(d.cfg.ProjectDir, path)
+		if err != nil || d.ignore.shouldIgnore(rel) {
+			return nil
+		}
+
+		info, err := entry.Info()
+		if err != nil || info.Size() > maxFileSize {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		lines := strings.Split(string(data), "\n")
+		for i, line := range lines {
+			if strings.Contains(strings.ToLower(line), lowerQuery) {
+				matches = append(matches, protocol.SearchMatch{
+					File:       rel,
+					LineNumber: i + 1,
+					Content:    strings.TrimSpace(line),
+				})
+				if len(matches) >= maxSearchResults {
+					truncated = true
+					return filepath.SkipAll
+				}
+			}
+		}
+		return nil
+	})
+
+	return protocol.SearchResults{
+		Matches:   matches,
+		Truncated: truncated,
+	}
 }
 
 func (d *Daemon) send(ctx context.Context, conn *websocket.Conn, msgType protocol.MessageType, payload any) error {

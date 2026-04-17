@@ -185,6 +185,9 @@ function handleMessage(envelope) {
   const payload = JSON.parse(atob(envelope.payload));
 
   switch (envelope.type) {
+    case 'search_results':
+      handleSearchResults(payload);
+      break;
     case 'password_required':
       // Session has a password — if we already have credentials, they were sent in onopen
       if (!sessionPassword && !hostToken) {
@@ -2180,6 +2183,167 @@ function reconnect() {
   };
 }
 
+// --- Project-wide search (Ctrl+Shift+F) ---
+
+let searchActive = false;
+let searchResults = [];
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
+    e.preventDefault();
+    if (searchActive) {
+      closeSearch();
+    } else {
+      openSearch();
+    }
+  }
+});
+
+function openSearch() {
+  searchActive = true;
+  searchResults = [];
+  const overlay = document.getElementById('file-picker-overlay');
+  overlay.style.display = 'flex';
+  const input = document.getElementById('file-picker-input');
+  input.value = '';
+  input.placeholder = 'Search in project...';
+  input.focus();
+  document.getElementById('file-picker-results').innerHTML = '';
+
+  let searchTimer = null;
+  let searchIndex = 0;
+
+  input.oninput = () => {
+    clearTimeout(searchTimer);
+    searchIndex = 0;
+    const query = input.value.trim();
+    if (query.length < 2) {
+      document.getElementById('file-picker-results').innerHTML = '';
+      return;
+    }
+    searchTimer = setTimeout(() => {
+      send('search_request', { query });
+    }, 300);
+  };
+
+  input.onkeydown = (e) => {
+    if (e.key === 'Escape') {
+      closeSearch();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      searchIndex = Math.min(searchIndex + 1, searchResults.length - 1);
+      highlightSearchResult(searchIndex);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      searchIndex = Math.max(searchIndex - 1, 0);
+      highlightSearchResult(searchIndex);
+    } else if (e.key === 'Enter') {
+      if (searchResults.length > 0) {
+        openSearchResult(searchResults[searchIndex]);
+        closeSearch();
+      }
+    }
+  };
+}
+
+function closeSearch() {
+  searchActive = false;
+  document.getElementById('file-picker-overlay').style.display = 'none';
+  document.getElementById('file-picker-input').placeholder = 'Go to file...';
+}
+
+function handleSearchResults(results) {
+  if (!searchActive) return;
+  searchResults = results.matches || [];
+  const container = document.getElementById('file-picker-results');
+  container.innerHTML = '';
+  const query = document.getElementById('file-picker-input').value.trim().toLowerCase();
+
+  for (const match of searchResults) {
+    const item = document.createElement('div');
+    item.className = 'file-picker-item';
+    item.style.padding = '6px 16px';
+
+    const header = document.createElement('div');
+    const file = document.createElement('span');
+    file.className = 'search-match-file';
+    file.textContent = match.file;
+    header.appendChild(file);
+    const lineNum = document.createElement('span');
+    lineNum.className = 'search-match-line';
+    lineNum.textContent = `:${match.line_number}`;
+    header.appendChild(lineNum);
+    item.appendChild(header);
+
+    const content = document.createElement('div');
+    content.className = 'search-match-content';
+    // Highlight the query in the content
+    if (query) {
+      const lower = match.content.toLowerCase();
+      const idx = lower.indexOf(query);
+      if (idx >= 0) {
+        content.appendChild(document.createTextNode(match.content.slice(0, idx)));
+        const hl = document.createElement('span');
+        hl.className = 'search-match-highlight';
+        hl.textContent = match.content.slice(idx, idx + query.length);
+        content.appendChild(hl);
+        content.appendChild(document.createTextNode(match.content.slice(idx + query.length)));
+      } else {
+        content.textContent = match.content;
+      }
+    } else {
+      content.textContent = match.content;
+    }
+    item.appendChild(content);
+
+    item.addEventListener('click', () => {
+      openSearchResult(match);
+      closeSearch();
+    });
+
+    container.appendChild(item);
+  }
+
+  if (results.truncated) {
+    const notice = document.createElement('div');
+    notice.className = 'search-truncated';
+    notice.textContent = 'Results truncated — refine your search';
+    container.appendChild(notice);
+  }
+
+  if (searchResults.length === 0 && document.getElementById('file-picker-input').value.trim().length >= 2) {
+    const notice = document.createElement('div');
+    notice.className = 'search-truncated';
+    notice.textContent = 'No matches found';
+    container.appendChild(notice);
+  }
+}
+
+function highlightSearchResult(index) {
+  const container = document.getElementById('file-picker-results');
+  container.querySelectorAll('.file-picker-item').forEach((el, i) => {
+    el.classList.toggle('active', i === index);
+  });
+  const active = container.querySelector('.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function openSearchResult(match) {
+  activeFile = match.file;
+  if (openFiles.has(match.file)) {
+    addTab(match.file);
+    openFileInEditor(match.file, openFiles.get(match.file));
+    activateTab(match.file);
+    highlightFileInTree(match.file);
+    updateBreadcrumb(match.file);
+    scrollToLine(match.line_number);
+    setStatus(match.file);
+  } else {
+    pendingScroll = { file: match.file, line: match.line_number };
+    send('open_file', { path: match.file });
+  }
+}
+
 // --- Quick file picker (Ctrl+P) ---
 
 let filePickerActive = false;
@@ -2187,8 +2351,9 @@ let filePickerIndex = 0;
 let filePickerMatches = [];
 
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'p') {
     e.preventDefault();
+    if (searchActive) closeSearch();
     if (filePickerActive) {
       closeFilePicker();
     } else {
@@ -2197,6 +2362,9 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape' && filePickerActive) {
     closeFilePicker();
+  }
+  if (e.key === 'Escape' && searchActive) {
+    closeSearch();
   }
 });
 

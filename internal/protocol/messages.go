@@ -48,6 +48,12 @@ const (
 	TypeRequestRole    MessageType = "request_role"
 	TypeReanchor       MessageType = "reanchor"
 
+	// Browser → Server → Daemon
+	TypeSearchRequest MessageType = "search_request"
+
+	// Daemon → Server → Browser
+	TypeSearchResults MessageType = "search_results"
+
 	// Server → Daemon
 	TypeActivity MessageType = "activity"
 
@@ -331,6 +337,24 @@ type TourDelete struct {
 type FollowStatus struct {
 	Name      string `json:"name"`
 	Following bool   `json:"following"`
+}
+
+// SearchRequest is sent by the browser to search project files.
+type SearchRequest struct {
+	Query string `json:"query"`
+}
+
+// SearchMatch is a single search result.
+type SearchMatch struct {
+	File       string `json:"file"`
+	LineNumber int    `json:"line_number"`
+	Content    string `json:"content"`
+}
+
+// SearchResults is sent back to the browser with matching lines.
+type SearchResults struct {
+	Matches   []SearchMatch `json:"matches"`
+	Truncated bool          `json:"truncated"`
 }
 
 // Activity is sent by the relay to the daemon for host-facing logging.

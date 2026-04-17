@@ -236,7 +236,8 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypeFileDeleted,
-			protocol.TypeCommentList, protocol.TypeTourList:
+			protocol.TypeCommentList, protocol.TypeTourList,
+			protocol.TypeSearchResults:
 			// Broadcast daemon-initiated changes to all browsers
 			sess.broadcastToBrowsers(r.Context(), data)
 
@@ -695,6 +696,10 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			sess.guideState = data
 			sess.mu.Unlock()
 			sess.broadcastToBrowsers(r.Context(), data)
+
+		case protocol.TypeSearchRequest:
+			// Relay to daemon
+			sess.writeToDaemon(r.Context(), data)
 
 		case protocol.TypeReanchor:
 			// Browser has re-parsed files and computed corrected positions
