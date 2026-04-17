@@ -216,6 +216,12 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		}
 		return os.Remove(fmt.Sprintf("%s/%s", d.cfg.ProjectDir, msg.Path))
 
+	case protocol.TypeActivity:
+		var msg protocol.Activity
+		if err := protocol.DecodePayload(env, &msg); err == nil {
+			fmt.Printf("  > %s\n", msg.Message)
+		}
+
 	case protocol.TypeSessionReady:
 		var msg protocol.SessionReady
 		if err := protocol.DecodePayload(env, &msg); err != nil {

@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -129,13 +130,13 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 		sess.mu.Lock()
 		sess.daemon = conn
 		sess.mu.Unlock()
-		log.Printf("daemon reconnected, session %s (project %s)", sessionID, msg.Name)
+		log.Printf("[session=%s] session_resume project=%s", sessionID[:12], msg.Name)
 	} else {
 		// New session — use daemon-provided host token
 		sess = newSession(sessionID, conn, msg.HostToken)
 		sess.projectID = msg.ProjectID
 		s.sessions[sessionID] = sess
-		log.Printf("daemon connected, session %s (project %s)", sessionID, msg.Name)
+		log.Printf("[session=%s] session_start project=%s", sessionID[:12], msg.Name)
 	}
 	s.mu.Unlock()
 
@@ -151,12 +152,12 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 				sess.mu.RUnlock()
 				if daemonGone {
 					delete(s.sessions, sessionID)
-					log.Printf("session %s expired (daemon did not reconnect)", sessionID)
+					log.Printf("[session=%s] session_expired", sessionID[:12])
 				}
 			}
 			s.mu.Unlock()
 		}()
-		log.Printf("daemon disconnected, session %s (keeping for 60s)", sessionID)
+		log.Printf("[session=%s] daemon_disconnect (grace=60s)", sessionID[:12])
 		// Notify browsers that daemon is gone
 		if statusData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: false}); err == nil {
 			sess.broadcastToBrowsers(r.Context(), statusData)
@@ -279,13 +280,19 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 
 	p := sess.addBrowser(conn)
 	defer func() {
+		name := p.name
+		if name == "" {
+			name = "unknown"
+		}
 		sess.removeBrowser(conn)
 		s.broadcastParticipants(r.Context(), sess)
 		s.broadcastCursorState(r.Context(), sess)
-		log.Printf("browser left session %s", sessionID)
+		s.logActivity(r.Context(), sess,
+			fmt.Sprintf("participant_leave name=%s session=%s", name, sessionID),
+			fmt.Sprintf("%s left", name))
 	}()
 
-	log.Printf("browser connected to session %s, waiting for identify", sessionID)
+	log.Printf("[session=%s] browser_connect (waiting for identify)", sessionID[:12])
 
 	// Wait for the identify message before doing anything else
 	for {
@@ -301,7 +308,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			var msg protocol.Identify
 			if err := protocol.DecodePayload(env, &msg); err == nil && msg.Name != "" {
 				sess.identifyBrowser(conn, msg.Name, msg.HostToken)
-				log.Printf("%s joined session %s (color %s, role %s)", msg.Name, sessionID, p.color, p.role)
+				s.logActivity(r.Context(), sess,
+					fmt.Sprintf("participant_join name=%s role=%s session=%s", msg.Name, p.role, sessionID),
+					fmt.Sprintf("%s joined as %s", msg.Name, p.role))
 				break
 			}
 		}
@@ -376,14 +385,19 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
+			p := sess.getParticipantByConn(conn)
+			pName := "unknown"
+			if p != nil { pName = p.name }
 			sess.trackFileRequest(msg.Path, conn)
 			reqData, err := protocol.Encode(protocol.TypeRequestFile, protocol.RequestFile{Path: msg.Path})
 			if err == nil {
 				sess.writeToDaemon(r.Context(), reqData)
 			}
+			s.logVerbose(r.Context(), sess,
+				fmt.Sprintf("%s opened %s", pName, msg.Path))
 
 		case protocol.TypeCloseFile:
-			// Acknowledged, no action needed — daemon doesn't track open files
+			// Acknowledged, no action needed
 
 		case protocol.TypeSaveFile:
 			if !sess.hasRole(conn, protocol.RoleEditor) {
@@ -393,6 +407,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
+			p := sess.getParticipantByConn(conn)
+			pName := "unknown"
+			if p != nil { pName = p.name }
 			writeData, err := protocol.Encode(protocol.TypeWriteFile, protocol.WriteFile{
 				Path:    msg.Path,
 				Content: msg.Content,
@@ -400,6 +417,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				sess.writeToDaemon(r.Context(), writeData)
 			}
+			s.logActivity(r.Context(), sess,
+				fmt.Sprintf("file_save name=%s file=%s", pName, msg.Path),
+				fmt.Sprintf("%s saved %s", pName, msg.Path))
 
 		case protocol.TypeCursorUpdate:
 			var msg protocol.CursorUpdate
@@ -442,6 +462,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.broadcastComments(r.Context(), sess)
+			s.logActivity(r.Context(), sess,
+				fmt.Sprintf("comment_add author=%s file=%s line=%d", p.name, msg.File, msg.Line),
+				fmt.Sprintf("%s commented on %s:%d", p.name, msg.File, msg.Line))
 
 		case protocol.TypeCommentReply:
 			if !sess.hasRole(conn, protocol.RoleCommenter) {
@@ -483,6 +506,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.broadcastComments(r.Context(), sess)
+			s.logActivity(r.Context(), sess,
+				fmt.Sprintf("comment_reply author=%s file=%s line=%d", p.name, parent.File, parent.Line),
+				fmt.Sprintf("%s replied on %s:%d", p.name, parent.File, parent.Line))
 
 		case protocol.TypeCommentResolve:
 			if !sess.hasRole(conn, protocol.RoleCommenter) {
@@ -495,7 +521,13 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := s.store.ResolveComment(sess.projectID, msg.CommentID); err != nil {
 				log.Printf("failed to resolve comment: %v", err)
 			}
+			p := sess.getParticipantByConn(conn)
+			pName := "unknown"
+			if p != nil { pName = p.name }
 			s.broadcastComments(r.Context(), sess)
+			s.logActivity(r.Context(), sess,
+				fmt.Sprintf("comment_toggle_resolve author=%s", pName),
+				fmt.Sprintf("%s toggled resolve on a comment", pName))
 
 		case protocol.TypeCommentDelete:
 			if !sess.hasRole(conn, protocol.RoleCommenter) {
@@ -508,7 +540,13 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := s.store.DeleteComment(sess.projectID, msg.CommentID); err != nil {
 				log.Printf("failed to delete comment: %v", err)
 			}
+			p := sess.getParticipantByConn(conn)
+			pName := "unknown"
+			if p != nil { pName = p.name }
 			s.broadcastComments(r.Context(), sess)
+			s.logActivity(r.Context(), sess,
+				fmt.Sprintf("comment_delete author=%s", pName),
+				fmt.Sprintf("%s deleted a comment", pName))
 
 		case protocol.TypeTourSave:
 			if !sess.hasRole(conn, protocol.RoleEditor) {
@@ -528,7 +566,13 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				log.Printf("failed to save tour: %v", err)
 				continue
 			}
+			p := sess.getParticipantByConn(conn)
+			pName := "unknown"
+			if p != nil { pName = p.name }
 			s.broadcastTours(r.Context(), sess)
+			s.logActivity(r.Context(), sess,
+				fmt.Sprintf("tour_save author=%s title=%s steps=%d", pName, tour.Title, len(tour.Steps)),
+				fmt.Sprintf("%s saved tour \"%s\" (%d steps)", pName, tour.Title, len(tour.Steps)))
 
 		case protocol.TypeTourDelete:
 			if !sess.hasRole(conn, protocol.RoleEditor) {
@@ -541,7 +585,13 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := s.store.DeleteTour(msg.ID); err != nil {
 				log.Printf("failed to delete tour: %v", err)
 			}
+			p := sess.getParticipantByConn(conn)
+			pName := "unknown"
+			if p != nil { pName = p.name }
 			s.broadcastTours(r.Context(), sess)
+			s.logActivity(r.Context(), sess,
+				fmt.Sprintf("tour_delete author=%s id=%s", pName, msg.ID),
+				fmt.Sprintf("%s deleted a tour", pName))
 
 		case protocol.TypeGuideStart:
 			if !sess.hasRole(conn, protocol.RoleHost) {
@@ -566,6 +616,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				sess.guideColor = p.color
 				sess.mu.Unlock()
 				sess.broadcastToBrowsers(r.Context(), relayData)
+				s.logActivity(r.Context(), sess,
+					fmt.Sprintf("guide_start name=%s", p.name),
+					fmt.Sprintf("%s started guiding", p.name))
 			}
 
 		case protocol.TypeGuideStop:
@@ -579,6 +632,8 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			sess.guideState = nil
 			sess.mu.Unlock()
 			sess.broadcastToBrowsers(r.Context(), data)
+			s.logActivity(r.Context(), sess,
+				"guide_stop", "Guide mode ended")
 
 		case protocol.TypeGuideState:
 			if !sess.hasRole(conn, protocol.RoleHost) {
@@ -618,6 +673,11 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 			sess.setRole(msg.TargetName, msg.Role)
 			s.broadcastParticipants(r.Context(), sess)
+			s.logActivity(r.Context(), sess,
+				fmt.Sprintf("role_change target=%s role=%s", msg.TargetName, msg.Role),
+				fmt.Sprintf("%s is now %s %s", msg.TargetName, aOrAn(string(msg.Role)), msg.Role))
+
+
 
 		case protocol.TypeFollowStatus:
 			// Inject name and broadcast
@@ -634,6 +694,10 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				sess.broadcastToBrowsers(r.Context(), relayData)
 			}
+			action := "unfollowed"
+			if msg.Following { action = "is following" }
+			s.logVerbose(r.Context(), sess,
+				fmt.Sprintf("%s %s the guide", p.name, action))
 
 		default:
 			log.Printf("unhandled browser message: %s payload=%s", env.Type, string(env.Payload))
@@ -701,6 +765,28 @@ func (s *Server) reanchorFile(ctx context.Context, sess *session, file string) {
 	}
 }
 
+// logActivity logs a structured relay event and sends a human-readable
+// message to the daemon for host-facing output.
+func (s *Server) logActivity(ctx context.Context, sess *session, relayMsg, daemonMsg string) {
+	// Structured relay log (for hosted service analytics)
+	log.Printf("[session=%s] %s", sess.id[:12], relayMsg)
+
+	// Forward to daemon for host terminal
+	if daemonMsg != "" {
+		if data, err := protocol.Encode(protocol.TypeActivity, protocol.Activity{Message: daemonMsg}); err == nil {
+			sess.writeToDaemon(ctx, data)
+		}
+	}
+}
+
+// logVerbose logs a debug-level event to the daemon only (not relay logs).
+// Used for high-frequency events like file opens and follow status.
+func (s *Server) logVerbose(ctx context.Context, sess *session, daemonMsg string) {
+	if data, err := protocol.Encode(protocol.TypeActivity, protocol.Activity{Message: daemonMsg}); err == nil {
+		sess.writeToDaemon(ctx, data)
+	}
+}
+
 func (s *Server) broadcastCursorState(ctx context.Context, sess *session) {
 	cursors := sess.getCursorState()
 	data, err := protocol.Encode(protocol.TypeCursorState, protocol.CursorState{
@@ -738,6 +824,13 @@ func (s *Server) broadcastParticipants(ctx context.Context, sess *session) {
 	if err == nil {
 		sess.broadcastToBrowsers(ctx, data)
 	}
+}
+
+func aOrAn(word string) string {
+	if len(word) > 0 && strings.ContainsRune("aeiou", rune(word[0])) {
+		return "an"
+	}
+	return "a"
 }
 
 func generateID() string {

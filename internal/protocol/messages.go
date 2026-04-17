@@ -43,6 +43,9 @@ const (
 	TypeSetRole        MessageType = "set_role"
 	TypeReanchor       MessageType = "reanchor"
 
+	// Server → Daemon
+	TypeActivity MessageType = "activity"
+
 	// Server → Browser
 	TypeDaemonStatus    MessageType = "daemon_status"
 	TypeYourColor       MessageType = "your_color"
@@ -313,6 +316,11 @@ type TourDelete struct {
 type FollowStatus struct {
 	Name      string `json:"name"`
 	Following bool   `json:"following"`
+}
+
+// Activity is sent by the relay to the daemon for host-facing logging.
+type Activity struct {
+	Message string `json:"message"`
 }
 
 // DaemonStatus is sent by the relay to browsers when the daemon connects/disconnects.
