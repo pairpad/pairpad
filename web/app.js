@@ -1949,6 +1949,19 @@ function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// --- Share URL ---
+
+window.copySessionURL = function() {
+  // Build collaborator URL (session hash without host token)
+  const url = `${location.protocol}//${location.host}/#${sessionId}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('share-btn');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 2000);
+  });
+};
+
 // --- Reconnection ---
 
 function reconnect() {
