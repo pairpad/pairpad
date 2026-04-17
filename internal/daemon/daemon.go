@@ -18,6 +18,7 @@ type Config struct {
 	ProjectDir string
 	ServerURL  string
 	NewSession bool                 // force a new session (ignore saved session ID)
+	SessionID  string               // explicit session ID (overrides saved and new)
 	OnReady    func(joinURL string) // called when session is ready (optional)
 }
 
@@ -39,7 +40,13 @@ func New(cfg Config) (*Daemon, error) {
 	}
 
 	project := detectProject(cfg.ProjectDir)
-	sessionID, hostToken := loadSession(project.ID, cfg.NewSession)
+	var sessionID, hostToken string
+	if cfg.SessionID != "" {
+		sessionID = cfg.SessionID
+		_, hostToken = loadSession(project.ID, false)
+	} else {
+		sessionID, hostToken = loadSession(project.ID, cfg.NewSession)
+	}
 
 	return &Daemon{
 		cfg:       cfg,

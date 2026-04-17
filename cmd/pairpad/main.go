@@ -65,6 +65,7 @@ func cmdLocal() {
 	addr := fs.StringP("addr", "a", envOrDefault("PAIRPAD_ADDR", ":8080"), "Relay listen address")
 	dir := fs.StringP("dir", "d", ".", "Project directory")
 	newSession := fs.Bool("new", false, "Start a new session (default: continue previous)")
+	sessionID := fs.String("session", "", "Resume a specific session ID")
 	noBrowser := fs.Bool("no-browser", false, "Don't open browser automatically")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Run relay + daemon together in one process. Zero configuration needed.
@@ -107,6 +108,7 @@ Flags:
 		ProjectDir: projectDir,
 		ServerURL:  fmt.Sprintf("ws://localhost%s", *addr),
 		NewSession: *newSession,
+		SessionID:  *sessionID,
 		OnReady: func(joinURL string) {
 			if !*noBrowser {
 				openBrowser(joinURL)
@@ -135,6 +137,7 @@ func cmdConnect() {
 	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "ws://localhost:8080"), "Relay server URL")
 	dir := fs.StringP("dir", "d", ".", "Project directory")
 	newSession := fs.Bool("new", false, "Start a new session (default: continue previous)")
+	sessionID := fs.String("session", "", "Resume a specific session ID")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Connect this project to a remote relay server.
 Continues the previous session by default. Use --new for a fresh session.
@@ -156,6 +159,7 @@ Flags:
 		ProjectDir: projectDir,
 		ServerURL:  *serverURL,
 		NewSession: *newSession,
+		SessionID:  *sessionID,
 	}
 
 	d, err := daemon.New(cfg)
