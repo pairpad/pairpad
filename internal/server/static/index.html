@@ -750,6 +750,14 @@
       </div>
 
       <!-- Step 2: Display name -->
+      <div id="step-password" style="display:none">
+        <p class="tagline" style="margin-bottom:16px">This session requires a password</p>
+        <div class="input-row">
+          <input type="password" id="password-input" placeholder="Session password">
+          <button onclick="submitPassword()">Next</button>
+        </div>
+      </div>
+
       <div id="step-name" style="display:none">
         <p class="tagline" style="margin-bottom:16px">What should others call you?</p>
         <div class="input-row">

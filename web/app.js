@@ -21,6 +21,7 @@ let userName = null;
 let myColor = null;
 let myRole = null;
 let hostToken = null;
+let sessionPassword = null; // cached for reconnection
 let editorView = null;
 
 // --- Connection (two-step: session ID, then name) ---
@@ -76,7 +77,17 @@ window.joinSession = function() {
   ws = new WebSocket(url);
 
   ws.onopen = () => {
-    // Send identify with host token if we have one
+    // If we have a cached password or host token, auto-authenticate
+    // then send identify. If no password required, server goes straight
+    // to waiting for identify.
+    if (sessionPassword || hostToken) {
+      send('session_auth', {
+        password: sessionPassword || '',
+        host_token: hostToken || '',
+      });
+    }
+    // Send identify — if password is required and not yet authenticated,
+    // the server will hold this until after session_auth succeeds
     const identifyMsg = { name: userName };
     if (hostToken) identifyMsg.host_token = hostToken;
     send('identify', identifyMsg);
@@ -145,9 +156,27 @@ window.joinSession = function() {
 document.getElementById('session-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') window.submitSession();
 });
+document.getElementById('password-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') window.submitPassword();
+});
 document.getElementById('name-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') window.joinSession();
 });
+
+window.submitPassword = function() {
+  const pwd = document.getElementById('password-input').value;
+  if (!pwd) return;
+  sessionPassword = pwd;
+  document.getElementById('connect-error').textContent = '';
+  // Send auth + identify
+  send('session_auth', { password: sessionPassword });
+  const identifyMsg = { name: userName };
+  if (hostToken) identifyMsg.host_token = hostToken;
+  send('identify', identifyMsg);
+  // Show IDE (will revert to password prompt if wrong)
+  document.getElementById('connect-overlay').style.display = 'none';
+  document.getElementById('ide').style.display = 'flex';
+};
 
 // --- Message handling ---
 
@@ -155,6 +184,32 @@ function handleMessage(envelope) {
   const payload = JSON.parse(atob(envelope.payload));
 
   switch (envelope.type) {
+    case 'password_required':
+      // Session has a password — if we already have credentials, they were sent in onopen
+      if (!sessionPassword && !hostToken) {
+        // Show password prompt, hide IDE
+        document.getElementById('ide').style.display = 'none';
+        document.getElementById('connect-overlay').style.display = 'flex';
+        document.getElementById('step-session').style.display = 'none';
+        document.getElementById('step-name').style.display = 'none';
+        document.getElementById('step-password').style.display = '';
+        document.getElementById('password-input').focus();
+      }
+      return;
+    case 'error':
+      if (payload.message === 'Wrong password') {
+        sessionPassword = null;
+        document.getElementById('ide').style.display = 'none';
+        document.getElementById('connect-overlay').style.display = 'flex';
+        document.getElementById('step-session').style.display = 'none';
+        document.getElementById('step-name').style.display = 'none';
+        document.getElementById('step-password').style.display = '';
+        document.getElementById('connect-error').textContent = 'Wrong password. Try again.';
+        document.getElementById('password-input').value = '';
+        document.getElementById('password-input').focus();
+        return;
+      }
+      break;
     case 'daemon_status': {
       const banner = document.getElementById('reconnect-banner');
       if (payload.connected && payload.loading) {
@@ -1873,7 +1928,13 @@ function reconnect() {
   ws = new WebSocket(url);
 
   ws.onopen = () => {
-    // Re-identify
+    // Re-authenticate and re-identify
+    if (sessionPassword || hostToken) {
+      send('session_auth', {
+        password: sessionPassword || '',
+        host_token: hostToken || '',
+      });
+    }
     const identifyMsg = { name: userName };
     if (hostToken) identifyMsg.host_token = hostToken;
     send('identify', identifyMsg);

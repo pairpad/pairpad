@@ -24,7 +24,11 @@ const (
 	TypeWriteFile   MessageType = "write_file"
 	TypeDeleteFile  MessageType = "delete_file"
 
+	// Server → Browser (session auth)
+	TypePasswordRequired MessageType = "password_required"
+
 	// Browser → Server
+	TypeSessionAuth    MessageType = "session_auth"
 	TypeIdentify       MessageType = "identify"
 	TypeOpenFile       MessageType = "open_file"
 	TypeCloseFile      MessageType = "close_file"
@@ -62,11 +66,12 @@ const (
 
 // ProjectConnect is sent by the daemon to identify which project it's serving.
 type ProjectConnect struct {
-	ProjectID string `json:"project_id"`
-	SessionID string `json:"session_id"`
-	HostToken string `json:"host_token"`
-	Name      string `json:"name"`
-	RemoteURL string `json:"remote_url,omitempty"`
+	ProjectID    string `json:"project_id"`
+	SessionID    string `json:"session_id"`
+	HostToken    string `json:"host_token"`
+	PasswordHash string `json:"password_hash,omitempty"`
+	Name         string `json:"name"`
+	RemoteURL    string `json:"remote_url,omitempty"`
 }
 
 // Envelope wraps every WebSocket message with a type discriminator.
@@ -148,6 +153,15 @@ type SessionReady struct {
 	SessionID string `json:"session_id"`
 	JoinURL   string `json:"join_url"`
 	HostToken string `json:"host_token"`
+}
+
+// PasswordRequired is sent by the relay when a session has a password.
+type PasswordRequired struct{}
+
+// SessionAuth is sent by the browser with the session password or host token.
+type SessionAuth struct {
+	Password  string `json:"password,omitempty"`
+	HostToken string `json:"host_token,omitempty"`
 }
 
 // Identify is sent by the browser immediately after connecting.

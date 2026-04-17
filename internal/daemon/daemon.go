@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -19,6 +21,7 @@ type Config struct {
 	ServerURL  string
 	NewSession bool                 // force a new session (ignore saved session ID)
 	SessionID  string               // explicit session ID (overrides saved and new)
+	Password   string               // session password (empty = no password)
 	OnReady    func(joinURL string) // called when session is ready (optional)
 }
 
@@ -103,12 +106,20 @@ func (d *Daemon) connectAndServe(ctx context.Context, events <-chan watcherEvent
 	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
 	// Identify the project and session
+	// Hash password if set
+	var passwordHash string
+	if d.cfg.Password != "" {
+		h := sha256.Sum256([]byte(d.cfg.Password))
+		passwordHash = hex.EncodeToString(h[:])
+	}
+
 	if err := d.send(ctx, conn, protocol.TypeProjectConnect, protocol.ProjectConnect{
-		ProjectID: d.project.ID,
-		SessionID: d.sessionID,
-		HostToken: d.hostToken,
-		Name:      d.project.Name,
-		RemoteURL: d.project.RemoteURL,
+		ProjectID:    d.project.ID,
+		SessionID:    d.sessionID,
+		HostToken:    d.hostToken,
+		PasswordHash: passwordHash,
+		Name:         d.project.Name,
+		RemoteURL:    d.project.RemoteURL,
 	}); err != nil {
 		return err
 	}

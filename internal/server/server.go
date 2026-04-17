@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"fmt"
@@ -126,15 +127,17 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	sess, reconnecting := s.sessions[sessionID]
 	if reconnecting {
-		// Reconnection: update daemon connection, keep existing state
+		// Reconnection: update daemon connection and password, keep existing state
 		sess.mu.Lock()
 		sess.daemon = conn
+		sess.passwordHash = msg.PasswordHash
 		sess.mu.Unlock()
 		log.Printf("[session=%s] session_resume project=%s", sessionID[:12], msg.Name)
 	} else {
 		// New session — use daemon-provided host token
 		sess = newSession(sessionID, conn, msg.HostToken)
 		sess.projectID = msg.ProjectID
+		sess.passwordHash = msg.PasswordHash
 		s.sessions[sessionID] = sess
 		log.Printf("[session=%s] session_start project=%s", sessionID[:12], msg.Name)
 	}
@@ -292,9 +295,58 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("%s left", name))
 	}()
 
-	log.Printf("[session=%s] browser_connect (waiting for identify)", sessionID[:12])
+	log.Printf("[session=%s] browser_connect", sessionID[:12])
 
-	// Wait for the identify message before doing anything else
+	// If session has a password, require it before identify
+	sess.mu.RLock()
+	hasPassword := sess.passwordHash != ""
+	sess.mu.RUnlock()
+
+	if hasPassword {
+		// Send password_required to browser
+		if reqData, err := protocol.Encode(protocol.TypePasswordRequired, protocol.PasswordRequired{}); err == nil {
+			conn.Write(r.Context(), websocket.MessageText, reqData)
+		}
+
+		// Wait for session_auth
+		authenticated := false
+		for {
+			_, data, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			env, err := protocol.Decode(data)
+			if err != nil {
+				continue
+			}
+			if env.Type == protocol.TypeSessionAuth {
+				var msg protocol.SessionAuth
+				if err := protocol.DecodePayload(env, &msg); err == nil {
+					// Host token bypasses password
+					if msg.HostToken != "" && msg.HostToken == sess.hostToken {
+						authenticated = true
+						break
+					}
+					sess.mu.RLock()
+					expected := sess.passwordHash
+					sess.mu.RUnlock()
+					if msg.Password != "" && hashPassword(msg.Password) == expected {
+						authenticated = true
+						break
+					}
+					// Wrong password — send error
+					if errData, err := protocol.Encode(protocol.TypeError, protocol.Error{Message: "Wrong password"}); err == nil {
+						conn.Write(r.Context(), websocket.MessageText, errData)
+					}
+				}
+			}
+		}
+		if !authenticated {
+			return
+		}
+	}
+
+	// Wait for the identify message
 	for {
 		_, data, err := conn.Read(r.Context())
 		if err != nil {
@@ -824,6 +876,11 @@ func (s *Server) broadcastParticipants(ctx context.Context, sess *session) {
 	if err == nil {
 		sess.broadcastToBrowsers(ctx, data)
 	}
+}
+
+func hashPassword(password string) string {
+	h := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(h[:])
 }
 
 func aOrAn(word string) string {

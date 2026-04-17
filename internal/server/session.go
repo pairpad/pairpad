@@ -47,6 +47,7 @@ type session struct {
 	fileTree     []protocol.FileEntry
 	colorIndex   int
 	hostToken    string
+	passwordHash string
 	guideActive  bool
 	guideName    string
 	guideColor   string
