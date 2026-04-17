@@ -1152,7 +1152,7 @@ function renderCommentEntry(comment) {
 
   const body = document.createElement('div');
   body.className = 'comment-body';
-  body.textContent = comment.body;
+  renderMarkdown(body, comment.body);
   entry.appendChild(body);
 
   return entry;
@@ -1976,6 +1976,52 @@ window.saveTour = function() {
   send('tour_save', tour);
   cancelTourCreation();
 };
+
+// Render basic markdown: **bold**, *italic*, `code`
+// Uses DOM manipulation (not innerHTML) for XSS safety.
+function renderMarkdown(el, text) {
+  // Regex to match **bold**, *italic*, `code` — non-greedy, no nesting
+  const pattern = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    // Add text before the match
+    if (match.index > lastIndex) {
+      el.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+    }
+
+    if (match[2]) {
+      // **bold**
+      const strong = document.createElement('strong');
+      strong.textContent = match[2];
+      el.appendChild(strong);
+    } else if (match[3]) {
+      // *italic*
+      const em = document.createElement('em');
+      em.textContent = match[3];
+      el.appendChild(em);
+    } else if (match[4]) {
+      // `code`
+      const code = document.createElement('code');
+      code.className = 'inline-code';
+      code.textContent = match[4];
+      el.appendChild(code);
+    }
+
+    lastIndex = pattern.lastIndex;
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    el.appendChild(document.createTextNode(text.slice(lastIndex)));
+  }
+
+  // If no matches, just set text
+  if (lastIndex === 0) {
+    el.textContent = text;
+  }
+}
 
 function formatLocation(file, line, lineEnd) {
   const name = file.split('/').pop();
