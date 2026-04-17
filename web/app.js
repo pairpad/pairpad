@@ -211,6 +211,17 @@ function handleMessage(envelope) {
         return;
       }
       break;
+    case 'request_role':
+      if (payload.role === 'denied' && payload.name === userName) {
+        // Our request was denied — reset banner
+        const banner = document.getElementById('readonly-banner');
+        if (banner) {
+          banner.innerHTML = 'Read-only — you can comment but not edit files. <a href="#" onclick="requestEditAccess(); return false;" style="color:var(--accent);">Request edit access</a>';
+        }
+      } else if (myRole === 'host' && payload.role !== 'denied') {
+        showRoleRequestToast(payload.name, payload.role);
+      }
+      break;
     case 'daemon_status': {
       const banner = document.getElementById('reconnect-banner');
       if (payload.connected && payload.loading) {
@@ -644,6 +655,42 @@ function showRoleMenu(targetName, currentRole, anchorEl) {
   setTimeout(() => document.addEventListener('click', close), 0);
 }
 
+function showRoleRequestToast(name, role) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.style.cursor = 'default';
+
+  const text = document.createElement('div');
+  text.textContent = `${name} is requesting ${role} access`;
+  toast.appendChild(text);
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:8px;margin-top:6px;';
+
+  const approve = document.createElement('button');
+  approve.textContent = 'Approve';
+  approve.style.cssText = 'background:var(--accent);color:var(--bg-primary);border:none;padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer;';
+  approve.addEventListener('click', () => {
+    send('set_role', { target_name: name, role });
+    toast.remove();
+  });
+  actions.appendChild(approve);
+
+  const deny = document.createElement('button');
+  deny.textContent = 'Deny';
+  deny.style.cssText = 'background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-input);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer;';
+  deny.addEventListener('click', () => {
+    send('request_role', { name, role: 'denied' });
+    toast.remove();
+  });
+  actions.appendChild(deny);
+
+  toast.appendChild(actions);
+  container.appendChild(toast);
+  // Don't auto-dismiss — host needs to act
+}
+
 function showJoinLeaveToast(name, action) {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
@@ -679,6 +726,23 @@ function applyRoleRestrictions() {
 
   // Editor: read-only for commenters
   setEditorEditable(canEdit);
+  const readonlyBanner = document.getElementById('readonly-banner');
+  if (readonlyBanner) {
+    if (canEdit) {
+      readonlyBanner.style.display = 'none';
+    } else {
+      readonlyBanner.style.display = 'block';
+      readonlyBanner.innerHTML = 'Read-only — you can comment but not edit files. <a href="#" onclick="requestEditAccess(); return false;" style="color:var(--accent);">Request edit access</a>';
+    }
+  }
+}
+
+window.requestEditAccess = function() {
+  send('request_role', { role: 'editor' });
+  const banner = document.getElementById('readonly-banner');
+  if (banner) {
+    banner.textContent = 'Edit access requested — waiting for host approval';
+  }
 }
 
 // --- File tree ---

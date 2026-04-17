@@ -333,6 +333,18 @@
       color: var(--bg-primary);
     }
 
+    /* Read-only banner */
+    #readonly-banner {
+      display: none;
+      padding: 3px 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      text-align: center;
+    }
+
     /* Breadcrumb path bar */
     #breadcrumb {
       display: none;
@@ -846,6 +858,7 @@
           <div id="tour-step-title"></div>
           <div id="tour-step-desc"></div>
         </div>
+        <div id="readonly-banner">Read-only — you can comment but not edit files. <a href="#" onclick="requestEditAccess(); return false;" style="color:var(--accent);">Request edit access</a></div>
         <div id="breadcrumb"></div>
         <div id="tabs"></div>
         <div id="editor-container"></div>

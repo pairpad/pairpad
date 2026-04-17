@@ -731,6 +731,29 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 
 
 
+		case protocol.TypeRequestRole:
+			var msg protocol.RequestRole
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			p := sess.getParticipantByConn(conn)
+			if p == nil {
+				continue
+			}
+			// For requests: inject sender's name. For denials: keep target name.
+			if msg.Name == "" {
+				msg.Name = p.name
+			}
+			relayData, err := protocol.Encode(protocol.TypeRequestRole, msg)
+			if err == nil {
+				sess.broadcastToBrowsers(r.Context(), relayData)
+			}
+			if string(msg.Role) != "denied" {
+				s.logActivity(r.Context(), sess,
+					fmt.Sprintf("role_request name=%s role=%s", msg.Name, msg.Role),
+					fmt.Sprintf("%s requested %s access", msg.Name, msg.Role))
+			}
+
 		case protocol.TypeFollowStatus:
 			// Inject name and broadcast
 			var msg protocol.FollowStatus

@@ -45,6 +45,7 @@ const (
 	TypeGuideState     MessageType = "guide_state"
 	TypeFollowStatus   MessageType = "follow_status"
 	TypeSetRole        MessageType = "set_role"
+	TypeRequestRole    MessageType = "request_role"
 	TypeReanchor       MessageType = "reanchor"
 
 	// Server → Daemon
@@ -348,6 +349,12 @@ type DaemonStatus struct {
 type Reanchor struct {
 	Comments []Comment `json:"comments,omitempty"`
 	Tours    []Tour    `json:"tours,omitempty"`
+}
+
+// RequestRole is sent by a participant to request a role upgrade.
+type RequestRole struct {
+	Name string `json:"name"`
+	Role Role   `json:"role"`
 }
 
 // SetRole is sent by the host to change a participant's role.
