@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"sync"
 
@@ -212,6 +214,23 @@ func (s *session) cacheFileContent(path string, content []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fileCache[path] = content
+}
+
+func (s *session) getCachedContent(path string) []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fileCache[path]
+}
+
+func (s *session) getFileHash(path string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	content, ok := s.fileCache[path]
+	if !ok {
+		return ""
+	}
+	h := sha256.Sum256(content)
+	return hex.EncodeToString(h[:])
 }
 
 func (s *session) getFileLines(path string) []string {

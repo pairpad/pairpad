@@ -460,6 +460,20 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
+			// Optimistic concurrency: reject if file changed since editor loaded it
+			if msg.BaseHash != "" {
+				currentHash := sess.getFileHash(msg.Path)
+				if currentHash != "" && currentHash != msg.BaseHash {
+					rejectData, err := protocol.Encode(protocol.TypeSaveRejected, protocol.SaveRejected{
+						Path:    msg.Path,
+						Content: sess.getCachedContent(msg.Path),
+					})
+					if err == nil {
+						conn.Write(r.Context(), websocket.MessageText, rejectData)
+					}
+					continue
+				}
+			}
 			p := sess.getParticipantByConn(conn)
 			pName := "unknown"
 			if p != nil { pName = p.name }

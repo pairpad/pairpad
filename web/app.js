@@ -3,6 +3,7 @@ import { getSymbolAtLine, reanchorBySymbol } from './symbols.js';
 
 let ws = null;
 let openFiles = new Map(); // path -> content string
+let fileHashes = new Map(); // path -> SHA256 hex string
 let activeFile = null;
 let fileTreeEntries = []; // latest file tree from daemon
 let cursorState = []; // latest cursor_state from server
@@ -23,6 +24,12 @@ let myRole = null;
 let hostToken = null;
 let sessionPassword = null; // cached for reconnection
 let editorView = null;
+
+async function computeHash(content) {
+  const data = new TextEncoder().encode(content);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 // --- Connection (two-step: session ID, then name) ---
 
@@ -256,6 +263,7 @@ function handleMessage(envelope) {
     case 'file_content': {
       const content = decodeContent(payload.content);
       openFiles.set(payload.path, content);
+      computeHash(content).then(h => fileHashes.set(payload.path, h));
       addTab(payload.path);
       openFileInEditor(payload.path, content);
       activateTab(payload.path);
@@ -288,16 +296,32 @@ function handleMessage(envelope) {
     }
     case 'file_changed': {
       const changed = decodeContent(payload.content);
+      const savedVersion = openFiles.get(payload.path);
       openFiles.set(payload.path, changed);
-      updateFileContent(payload.path, changed);
-      // Refresh markers and re-anchor annotations via AST
-      if (payload.path === getCurrentPath()) {
+      // If the editor has unsaved local edits for this file, don't
+      // overwrite — the user will get a conflict on their next save
+      // because the base hash won't match the relay's cached version.
+      const isActive = payload.path === getCurrentPath();
+      const editorContent = isActive ? getEditorContent() : null;
+      const hasLocalEdits = editorContent !== null && savedVersion !== undefined && editorContent !== savedVersion;
+      if (!hasLocalEdits) {
+        updateFileContent(payload.path, changed);
+        computeHash(changed).then(h => fileHashes.set(payload.path, h));
+      }
+      if (isActive) {
         requestAnimationFrame(() => {
           refreshCommentGutter();
           refreshTourMarkers();
           reanchorAnnotationsForFile(payload.path);
+          checkUnsaved();
         });
       }
+      break;
+    }
+    case 'save_rejected': {
+      const current = decodeContent(payload.content);
+      showConflictBanner(payload.path, current);
+      setStatus('Save rejected — file was modified');
       break;
     }
     case 'file_created': {
@@ -1067,7 +1091,7 @@ function saveFile() {
 
   openFiles.set(activeFile, content);
   const encoded = btoa(new TextEncoder().encode(content).reduce((s, b) => s + String.fromCharCode(b), ''));
-  send('save_file', { path: activeFile, content: encoded });
+  send('save_file', { path: activeFile, content: encoded, base_hash: fileHashes.get(activeFile) || '' });
   setStatus(`Saved ${activeFile}`);
   checkUnsaved();
 }
@@ -1086,6 +1110,37 @@ function send(type, payload) {
 
 function setStatus(text) {
   document.getElementById('status-text').textContent = text;
+}
+
+function showConflictBanner(path, serverContent) {
+  const banner = document.getElementById('conflict-banner');
+  const name = path.split('/').pop();
+  banner.innerHTML = '';
+  banner.appendChild(document.createTextNode(`${name} was modified externally.`));
+
+  const overwriteBtn = document.createElement('button');
+  overwriteBtn.textContent = 'Overwrite';
+  overwriteBtn.addEventListener('click', () => {
+    banner.style.display = 'none';
+    computeHash(serverContent).then(h => {
+      fileHashes.set(path, h);
+      saveFile();
+    });
+  });
+  banner.appendChild(overwriteBtn);
+
+  const reloadBtn = document.createElement('button');
+  reloadBtn.textContent = 'Reload';
+  reloadBtn.addEventListener('click', () => {
+    banner.style.display = 'none';
+    openFiles.set(path, serverContent);
+    computeHash(serverContent).then(h => fileHashes.set(path, h));
+    updateFileContent(path, serverContent);
+    checkUnsaved();
+  });
+  banner.appendChild(reloadBtn);
+
+  banner.style.display = 'block';
 }
 
 // --- Comments ---

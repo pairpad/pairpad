@@ -58,6 +58,7 @@ const (
 	TypeActivity MessageType = "activity"
 
 	// Server → Browser
+	TypeSaveRejected    MessageType = "save_rejected"
 	TypeDaemonStatus    MessageType = "daemon_status"
 	TypeYourColor       MessageType = "your_color"
 	TypeParticipantList MessageType = "participant_list"
@@ -151,6 +152,14 @@ type CloseFile struct {
 
 // SaveFile is sent by a browser client to persist the current editor contents.
 type SaveFile struct {
+	Path     string `json:"path"`
+	Content  []byte `json:"content"`
+	BaseHash string `json:"base_hash,omitempty"`
+}
+
+// SaveRejected is sent to a browser when a save is rejected due to a
+// concurrent modification. Contains the current file content.
+type SaveRejected struct {
 	Path    string `json:"path"`
 	Content []byte `json:"content"`
 }
