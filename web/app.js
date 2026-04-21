@@ -1160,11 +1160,43 @@ function renderCommentFeed() {
       thread.appendChild(badge);
     }
 
-    // Location link — always clickable, even for orphaned (jumps to last-known location)
+    // Location — editable line input when stale/orphaned, otherwise clickable link
     const loc = document.createElement('div');
     loc.className = 'comment-location';
-    loc.textContent = formatLocation(root.file, root.line, root.line_end);
-    loc.addEventListener('click', () => jumpToComment(root));
+    if (root.stale || root.orphaned) {
+      const fileName = root.file.split('/').pop();
+      const label = document.createElement('span');
+      label.textContent = fileName + ':';
+      label.style.cursor = 'pointer';
+      label.addEventListener('click', () => jumpToComment(root));
+      loc.appendChild(label);
+      const lineInput = document.createElement('input');
+      lineInput.type = 'number';
+      lineInput.className = 'comment-reanchor-input';
+      lineInput.value = root.line;
+      lineInput.min = 1;
+      lineInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const newLine = parseInt(lineInput.value, 10);
+          if (!newLine || newLine < 1) return;
+          const v = getView();
+          const sym = v && getCurrentPath() === root.file ? getSymbolAtLine(v, newLine) : null;
+          const updated = {
+            ...root,
+            line: newLine,
+            orphaned: false,
+            stale: false,
+            symbol_path: sym ? sym.symbolPath : '',
+            symbol_offset: sym ? sym.symbolOffset : 0,
+          };
+          send('reanchor', { comments: [updated] });
+        }
+      });
+      loc.appendChild(lineInput);
+    } else {
+      loc.textContent = formatLocation(root.file, root.line, root.line_end);
+      loc.addEventListener('click', () => jumpToComment(root));
+    }
     thread.appendChild(loc);
 
     // Root comment

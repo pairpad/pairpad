@@ -708,12 +708,24 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if len(msg.Comments) > 0 {
+				for i := range msg.Comments {
+					if lines := sess.getFileLines(msg.Comments[i].File); lines != nil {
+						anchor.PopulateComment(&msg.Comments[i], lines)
+					}
+				}
 				if err := s.store.UpdateComments(sess.projectID, msg.Comments); err != nil {
 					log.Printf("failed to update reanchored comments: %v", err)
 				}
 				s.broadcastComments(r.Context(), sess)
 			}
 			if len(msg.Tours) > 0 {
+				for i := range msg.Tours {
+					for j := range msg.Tours[i].Steps {
+						if lines := sess.getFileLines(msg.Tours[i].Steps[j].File); lines != nil {
+							anchor.PopulateTourStep(&msg.Tours[i].Steps[j], lines)
+						}
+					}
+				}
 				if err := s.store.UpdateTours(sess.projectID, msg.Tours); err != nil {
 					log.Printf("failed to update reanchored tours: %v", err)
 				}
