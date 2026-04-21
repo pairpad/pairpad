@@ -553,11 +553,15 @@ function reanchorAnnotationsForFile(file) {
 
     const newLine = reanchorBySymbol(v, c.symbol_path, c.symbol_offset || 0);
     if (newLine !== null && newLine !== c.line) {
-      const updated = { ...c, line: newLine, orphaned: false };
+      const updated = { ...c, line: newLine, orphaned: false, stale: false };
+      updatedComments.push(updated);
+      changed = true;
+    } else if (newLine !== null && (c.orphaned || c.stale)) {
+      const updated = { ...c, orphaned: false, stale: false };
       updatedComments.push(updated);
       changed = true;
     } else if (newLine === null && !c.orphaned) {
-      const updated = { ...c, orphaned: true };
+      const updated = { ...c, orphaned: true, stale: false };
       updatedComments.push(updated);
       changed = true;
     }
@@ -571,10 +575,13 @@ function reanchorAnnotationsForFile(file) {
       const newLine = reanchorBySymbol(v, step.symbol_path, step.symbol_offset || 0);
       if (newLine !== null && newLine !== step.line) {
         tourChanged = true;
-        return { ...step, line: newLine, orphaned: false };
+        return { ...step, line: newLine, orphaned: false, stale: false };
+      } else if (newLine !== null && (step.orphaned || step.stale)) {
+        tourChanged = true;
+        return { ...step, orphaned: false, stale: false };
       } else if (newLine === null && !step.orphaned) {
         tourChanged = true;
-        return { ...step, orphaned: true };
+        return { ...step, orphaned: true, stale: false };
       }
       return step;
     });
@@ -1136,6 +1143,7 @@ function renderCommentFeed() {
     const classes = ['comment-thread'];
     if (root.resolved) classes.push('resolved');
     if (root.orphaned) classes.push('orphaned');
+    else if (root.stale) classes.push('stale');
     thread.className = classes.join(' ');
     thread.dataset.commentId = root.id;
 
@@ -1144,6 +1152,11 @@ function renderCommentFeed() {
       const badge = document.createElement('div');
       badge.className = 'comment-orphaned-badge';
       badge.textContent = 'Code changed — this comment may no longer apply';
+      thread.appendChild(badge);
+    } else if (root.stale) {
+      const badge = document.createElement('div');
+      badge.className = 'comment-stale-badge';
+      badge.textContent = 'Anchor may have drifted — open the file to verify';
       thread.appendChild(badge);
     }
 

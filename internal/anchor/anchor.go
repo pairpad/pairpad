@@ -21,21 +21,23 @@ func GetContext(lines []string, idx int) []string {
 }
 
 // FindLine tries to locate anchor text in the given lines.
-// Returns (new 0-based index, orphaned).
-func FindLine(lines []string, currentIdx int, anchorText string, anchorContext []string) (int, bool) {
+// Returns (new 0-based index, orphaned, confidence).
+// Confidence is 1.0 for exact matches, 0.0 for orphaned, and
+// proportional to context line matches for fuzzy matches.
+func FindLine(lines []string, currentIdx int, anchorText string, anchorContext []string) (int, bool, float32) {
 	if lines == nil {
-		return currentIdx, true
+		return currentIdx, true, 0
 	}
 
 	// 1. Check if anchor text is still at the current line
 	if currentIdx >= 0 && currentIdx < len(lines) && lines[currentIdx] == anchorText {
-		return currentIdx, false
+		return currentIdx, false, 1.0
 	}
 
 	// 2. Search for exact match anywhere
 	for i, line := range lines {
 		if line == anchorText {
-			return i, false
+			return i, false, 1.0
 		}
 	}
 
@@ -53,12 +55,13 @@ func FindLine(lines []string, currentIdx int, anchorText string, anchorContext [
 		}
 
 		if bestLine >= 0 && bestScore >= len(anchorContext)/2 {
-			return bestLine, false
+			confidence := float32(bestScore) / float32(len(anchorContext))
+			return bestLine, false, confidence
 		}
 	}
 
 	// 4. No match — orphaned
-	return currentIdx, true
+	return currentIdx, true, 0
 }
 
 func contextMatchScore(lines []string, idx int, context []string) int {
@@ -105,6 +108,8 @@ func PopulateTourStep(step *protocol.TourStep, lines []string) {
 	}
 }
 
+const staleThreshold = 0.8
+
 // ReanchorComments re-anchors all comments for a file. Returns true if any changed.
 func ReanchorComments(comments []protocol.Comment, file string, lines []string) bool {
 	changed := false
@@ -114,22 +119,29 @@ func ReanchorComments(comments []protocol.Comment, file string, lines []string) 
 			continue
 		}
 
-		newIdx, orphaned := FindLine(lines, c.Line-1, c.AnchorText, c.AnchorContext)
+		newIdx, orphaned, confidence := FindLine(lines, c.Line-1, c.AnchorText, c.AnchorContext)
 		newLine := newIdx + 1
 
 		// Re-anchor end line
 		newEndIdx := -1
 		endOrphaned := false
+		endConfidence := float32(1.0)
 		if c.LineEnd > 0 && c.AnchorTextEnd != "" {
-			newEndIdx, endOrphaned = FindLine(lines, c.LineEnd-1, c.AnchorTextEnd, c.AnchorContextEnd)
+			newEndIdx, endOrphaned, endConfidence = FindLine(lines, c.LineEnd-1, c.AnchorTextEnd, c.AnchorContextEnd)
 		}
 
 		if (orphaned || endOrphaned) && !c.Orphaned {
 			c.Orphaned = true
+			c.Stale = false
 			changed = true
 		} else if !orphaned && !endOrphaned {
 			if c.Orphaned {
 				c.Orphaned = false
+				changed = true
+			}
+			stale := confidence < staleThreshold || endConfidence < staleThreshold
+			if c.Stale != stale {
+				c.Stale = stale
 				changed = true
 			}
 			if c.Line != newLine {
@@ -167,21 +179,28 @@ func ReanchorTourSteps(tours []protocol.Tour, file string, lines []string) bool 
 				continue
 			}
 
-			newIdx, orphaned := FindLine(lines, step.Line-1, step.AnchorText, step.AnchorContext)
+			newIdx, orphaned, confidence := FindLine(lines, step.Line-1, step.AnchorText, step.AnchorContext)
 			newLine := newIdx + 1
 
 			newEndIdx := -1
 			endOrphaned := false
+			endConfidence := float32(1.0)
 			if step.LineEnd > 0 && step.AnchorTextEnd != "" {
-				newEndIdx, endOrphaned = FindLine(lines, step.LineEnd-1, step.AnchorTextEnd, step.AnchorContextEnd)
+				newEndIdx, endOrphaned, endConfidence = FindLine(lines, step.LineEnd-1, step.AnchorTextEnd, step.AnchorContextEnd)
 			}
 
 			if (orphaned || endOrphaned) && !step.Orphaned {
 				step.Orphaned = true
+				step.Stale = false
 				changed = true
 			} else if !orphaned && !endOrphaned {
 				if step.Orphaned {
 					step.Orphaned = false
+					changed = true
+				}
+				stale := confidence < staleThreshold || endConfidence < staleThreshold
+				if step.Stale != stale {
+					step.Stale = stale
 					changed = true
 				}
 				if step.Line != newLine {

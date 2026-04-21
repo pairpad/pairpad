@@ -21,6 +21,7 @@
       --accent: #89b4fa;
       --accent-hover: #74c7ec;
       --error: #f38ba8;
+      --warning: #f9e2af;
       --success: #a6e3a1;
     }
     .theme-light {
@@ -36,6 +37,7 @@
       --accent: #0969da;
       --accent-hover: #0550ae;
       --error: #cf222e;
+      --warning: #bf8700;
       --success: #1a7f37;
     }
 
@@ -447,6 +449,14 @@
     .comment-orphaned-badge {
       font-size: 10px;
       color: var(--error);
+      margin-bottom: 4px;
+    }
+    .comment-thread.stale {
+      border-left: 2px solid var(--warning);
+    }
+    .comment-stale-badge {
+      font-size: 10px;
+      color: var(--warning);
       margin-bottom: 4px;
     }
     .comment-location {

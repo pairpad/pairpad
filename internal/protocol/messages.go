@@ -272,6 +272,7 @@ type Comment struct {
 	AnchorTextEnd    string   `json:"anchor_text_end,omitempty"`
 	AnchorContextEnd []string `json:"anchor_context_end,omitempty"`
 	Orphaned         bool     `json:"orphaned,omitempty"`
+	Stale            bool     `json:"stale,omitempty"`
 }
 
 // CommentList is broadcast to all browsers with the full comment state.
@@ -313,6 +314,7 @@ type TourStep struct {
 	AnchorTextEnd    string   `json:"anchor_text_end,omitempty"`
 	AnchorContextEnd []string `json:"anchor_context_end,omitempty"`
 	Orphaned         bool     `json:"orphaned,omitempty"`
+	Stale            bool     `json:"stale,omitempty"`
 }
 
 // Tour is a named, ordered walkthrough of the codebase.
