@@ -255,6 +255,30 @@ func (s *session) getFileTree() []protocol.FileEntry {
 	return s.fileTree
 }
 
+func (s *session) closeAllBrowsers() {
+	s.mu.RLock()
+	conns := make([]*websocket.Conn, 0, len(s.participants))
+	for conn := range s.participants {
+		conns = append(conns, conn)
+	}
+	s.mu.RUnlock()
+	for _, conn := range conns {
+		conn.Close(websocket.StatusGoingAway, "session expired")
+	}
+}
+
+func (s *session) evictCaches() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fileCache = make(map[string][]byte)
+	s.fileTree = nil
+	s.pendingFiles = make(map[string]*websocket.Conn)
+	s.guideActive = false
+	s.guideName = ""
+	s.guideColor = ""
+	s.guideState = nil
+}
+
 // broadcastToBrowsers sends a message to all connected browser clients.
 func (s *session) broadcastToBrowsers(ctx context.Context, data []byte) {
 	s.mu.RLock()

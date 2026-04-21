@@ -66,6 +66,15 @@ func (s *DB) migrate() error {
 
 		CREATE INDEX IF NOT EXISTS idx_annotations_project
 			ON annotations(project_id);
+
+		CREATE TABLE IF NOT EXISTS sessions (
+			id            TEXT PRIMARY KEY,
+			project_id    TEXT NOT NULL,
+			host_token    TEXT NOT NULL,
+			password_hash TEXT NOT NULL DEFAULT '',
+			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_seen_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
 	`)
 	return err
 }

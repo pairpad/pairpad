@@ -88,9 +88,10 @@ Flags:
 	publicURL := fmt.Sprintf("http://localhost%s", *addr)
 
 	srvCfg := server.Config{
-		Addr:      *addr,
-		DBPath:    envOrDefault("DATABASE_PATH", defaultDBPath()),
-		PublicURL: publicURL,
+		Addr:        *addr,
+		DBPath:      envOrDefault("DATABASE_PATH", defaultDBPath()),
+		PublicURL:   publicURL,
+		MaxSessions: 1,
 	}
 
 	srv, err := server.New(srvCfg)
@@ -182,6 +183,7 @@ func cmdRelay() {
 	addr := fs.StringP("addr", "a", envOrDefault("PAIRPAD_ADDR", ":8080"), "Listen address")
 	dbPath := fs.String("db", envOrDefault("DATABASE_PATH", defaultDBPath()), "SQLite database path")
 	publicURL := fs.String("public-url", "", "Public URL for session links (default: http://localhost:<port>)")
+	maxSessions := fs.Int("max-sessions", 0, "Maximum concurrent sessions (0 = unlimited)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Run the relay server. Browsers and daemons connect to this.
 
@@ -198,9 +200,10 @@ Flags:
 	}
 
 	cfg := server.Config{
-		Addr:      *addr,
-		DBPath:    *dbPath,
-		PublicURL: *publicURL,
+		Addr:        *addr,
+		DBPath:      *dbPath,
+		PublicURL:   *publicURL,
+		MaxSessions: *maxSessions,
 	}
 
 	srv, err := server.New(cfg)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -87,8 +88,14 @@ func (d *Daemon) Run() error {
 			return nil // clean shutdown
 		}
 
-		if err != nil && !d.everConnected {
-			return fmt.Errorf("could not connect to relay at %s — is it running?", d.cfg.ServerURL)
+		if err != nil {
+			var closeErr websocket.CloseError
+			if errors.As(err, &closeErr) && closeErr.Code == websocket.StatusPolicyViolation {
+				return fmt.Errorf("relay rejected connection: %s", closeErr.Reason)
+			}
+			if !d.everConnected {
+				return fmt.Errorf("could not connect to relay at %s — is it running?", d.cfg.ServerURL)
+			}
 		}
 
 		fmt.Printf("pairpad: lost connection to relay, reconnecting...\n")

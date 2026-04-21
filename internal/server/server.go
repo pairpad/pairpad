@@ -28,9 +28,10 @@ var staticFiles embed.FS
 
 // Config holds the server configuration.
 type Config struct {
-	Addr      string
-	DBPath    string
-	PublicURL string // e.g. "http://localhost:8080" — used in session_ready join URL
+	Addr        string
+	DBPath      string
+	PublicURL   string // e.g. "http://localhost:8080" — used in session_ready join URL
+	MaxSessions int    // 0 = unlimited
 }
 
 // Server is the Pairpad backend that relays messages between daemons and
@@ -47,6 +48,10 @@ func New(cfg Config) (*Server, error) {
 	store, err := storage.Open(cfg.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	if err := store.DeleteStaleSessions(7 * 24 * time.Hour); err != nil {
+		log.Printf("failed to clean stale sessions: %v", err)
 	}
 
 	return &Server{
@@ -127,44 +132,64 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	sess, reconnecting := s.sessions[sessionID]
 	if reconnecting {
-		// Reconnection: update daemon connection and password, keep existing state
+		// Reconnection to in-memory session: update daemon connection
 		sess.mu.Lock()
 		sess.daemon = conn
 		sess.passwordHash = msg.PasswordHash
 		sess.mu.Unlock()
+		s.store.TouchSession(sessionID)
 		log.Printf("[session=%s] session_resume project=%s", sessionID[:12], msg.Name)
 	} else {
-		// New session — use daemon-provided host token
-		sess = newSession(sessionID, conn, msg.HostToken)
-		sess.projectID = msg.ProjectID
-		sess.passwordHash = msg.PasswordHash
-		s.sessions[sessionID] = sess
-		log.Printf("[session=%s] session_start project=%s", sessionID[:12], msg.Name)
+		// Not in memory — check max-sessions before creating
+		if s.cfg.MaxSessions > 0 && len(s.sessions) >= s.cfg.MaxSessions {
+			s.mu.Unlock()
+			conn.Close(websocket.StatusPolicyViolation, "relay at capacity — too many active sessions")
+			return
+		}
+		// Check if session exists in SQLite (relay restarted)
+		dbSess, _ := s.store.GetSession(sessionID)
+		if dbSess != nil && dbSess.HostToken == msg.HostToken {
+			sess = newSession(sessionID, conn, dbSess.HostToken)
+			sess.projectID = dbSess.ProjectID
+			sess.passwordHash = msg.PasswordHash
+			s.sessions[sessionID] = sess
+			s.store.TouchSession(sessionID)
+			log.Printf("[session=%s] session_restore project=%s", sessionID[:12], msg.Name)
+		} else {
+			sess = newSession(sessionID, conn, msg.HostToken)
+			sess.projectID = msg.ProjectID
+			sess.passwordHash = msg.PasswordHash
+			s.sessions[sessionID] = sess
+			s.store.SaveSession(sessionID, msg.ProjectID, msg.HostToken, msg.PasswordHash)
+			log.Printf("[session=%s] session_start project=%s", sessionID[:12], msg.Name)
+		}
 	}
 	s.mu.Unlock()
 
 	defer func() {
-		// Don't delete the session immediately — keep it for 60 seconds
-		// in case the daemon reconnects
-		go func() {
-			time.Sleep(60 * time.Second)
-			s.mu.Lock()
-			if sess, ok := s.sessions[sessionID]; ok {
-				sess.mu.RLock()
-				daemonGone := sess.daemon == conn // still our old conn
-				sess.mu.RUnlock()
-				if daemonGone {
-					delete(s.sessions, sessionID)
-					log.Printf("[session=%s] session_expired", sessionID[:12])
-				}
-			}
-			s.mu.Unlock()
-		}()
+		// Evict heavy caches immediately on disconnect
+		sess.evictCaches()
 		log.Printf("[session=%s] daemon_disconnect (grace=60s)", sessionID[:12])
 		// Notify browsers that daemon is gone
 		if statusData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: false}); err == nil {
 			sess.broadcastToBrowsers(r.Context(), statusData)
 		}
+		// Delete from memory after 60 seconds, keep in SQLite
+		go func() {
+			time.Sleep(60 * time.Second)
+			s.mu.Lock()
+			if sess, ok := s.sessions[sessionID]; ok {
+				sess.mu.RLock()
+				daemonGone := sess.daemon == conn
+				sess.mu.RUnlock()
+				if daemonGone {
+					sess.closeAllBrowsers()
+					delete(s.sessions, sessionID)
+					log.Printf("[session=%s] session_expired (persisted in db)", sessionID[:12])
+				}
+			}
+			s.mu.Unlock()
+		}()
 	}()
 
 	// Send session_ready to daemon with the join URL and host token

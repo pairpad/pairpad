@@ -2245,12 +2245,13 @@ window.copySessionURL = function() {
 // --- Reconnection ---
 
 let reconnectAttempts = 0;
-const maxReconnectAttempts = 30; // give up after 60 seconds (30 * 2s)
+const maxReconnectAttempts = 10;
 
 function reconnect() {
   reconnectAttempts++;
   if (reconnectAttempts > maxReconnectAttempts) {
-    document.getElementById('reconnect-banner').textContent = 'Session ended. Reload to start a new session.';
+    const banner = document.getElementById('reconnect-banner');
+    banner.innerHTML = 'Session expired. <a href="javascript:location.reload()" style="color:inherit;text-decoration:underline;">Reload</a> to reconnect when the host is back.';
     setStatus('Disconnected');
     return;
   }
