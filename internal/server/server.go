@@ -72,8 +72,6 @@ func (s *Server) Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/daemon", s.handleDaemon)
 	mux.HandleFunc("/ws/browser", s.handleBrowser)
-	mux.HandleFunc("/api/sessions", s.handleListSessions)
-
 	// Serve embedded frontend static files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -929,25 +927,6 @@ func (s *Server) broadcastCursorState(ctx context.Context, sess *session) {
 	if err == nil {
 		sess.broadcastToBrowsers(ctx, data)
 	}
-}
-
-func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"sessions":[`)
-	i := 0
-	for id, sess := range s.sessions {
-		if i > 0 {
-			fmt.Fprint(w, ",")
-		}
-		sess.mu.RLock()
-		fmt.Fprintf(w, `{"id":%q,"participants":%d,"files":%d}`, id, len(sess.participants), len(sess.fileTree))
-		sess.mu.RUnlock()
-		i++
-	}
-	fmt.Fprint(w, "]}")
 }
 
 func (s *Server) broadcastParticipants(ctx context.Context, sess *session) {
