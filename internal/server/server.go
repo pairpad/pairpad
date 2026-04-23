@@ -742,34 +742,79 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			sess.writeToDaemon(r.Context(), data)
 
 		case protocol.TypeReanchor:
-			// Browser has re-parsed files and computed corrected positions
+			// Browser has re-parsed files and computed corrected positions.
+			// Only anchor-related fields are accepted; content fields
+			// (Author, Body, Timestamp, etc.) are preserved from the DB.
 			var msg protocol.Reanchor
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
 			if len(msg.Comments) > 0 {
-				for i := range msg.Comments {
-					if lines := sess.getFileLines(msg.Comments[i].File); lines != nil {
-						anchor.PopulateComment(&msg.Comments[i], lines)
+				existing, _ := s.store.GetComments(sess.projectID)
+				byID := make(map[string]*protocol.Comment, len(existing))
+				for i := range existing {
+					byID[existing[i].ID] = &existing[i]
+				}
+				var updated []protocol.Comment
+				for _, incoming := range msg.Comments {
+					c, ok := byID[incoming.ID]
+					if !ok {
+						continue
 					}
+					c.File = incoming.File
+					c.Line = incoming.Line
+					c.LineEnd = incoming.LineEnd
+					c.SymbolPath = incoming.SymbolPath
+					c.SymbolOffset = incoming.SymbolOffset
+					c.Stale = incoming.Stale
+					c.Orphaned = incoming.Orphaned
+					if lines := sess.getFileLines(c.File); lines != nil {
+						anchor.PopulateComment(c, lines)
+					}
+					updated = append(updated, *c)
 				}
-				if err := s.store.UpdateComments(sess.projectID, msg.Comments); err != nil {
-					log.Printf("failed to update reanchored comments: %v", err)
+				if len(updated) > 0 {
+					if err := s.store.UpdateComments(sess.projectID, updated); err != nil {
+						log.Printf("failed to update reanchored comments: %v", err)
+					}
+					s.broadcastComments(r.Context(), sess)
 				}
-				s.broadcastComments(r.Context(), sess)
 			}
 			if len(msg.Tours) > 0 {
-				for i := range msg.Tours {
-					for j := range msg.Tours[i].Steps {
-						if lines := sess.getFileLines(msg.Tours[i].Steps[j].File); lines != nil {
-							anchor.PopulateTourStep(&msg.Tours[i].Steps[j], lines)
+				existing, _ := s.store.GetTours(sess.projectID)
+				byID := make(map[string]*protocol.Tour, len(existing))
+				for i := range existing {
+					byID[existing[i].ID] = &existing[i]
+				}
+				var updated []protocol.Tour
+				for _, incoming := range msg.Tours {
+					t, ok := byID[incoming.ID]
+					if !ok {
+						continue
+					}
+					for j, step := range incoming.Steps {
+						if j >= len(t.Steps) {
+							break
+						}
+						t.Steps[j].File = step.File
+						t.Steps[j].Line = step.Line
+						t.Steps[j].LineEnd = step.LineEnd
+						t.Steps[j].SymbolPath = step.SymbolPath
+						t.Steps[j].SymbolOffset = step.SymbolOffset
+						t.Steps[j].Stale = step.Stale
+						t.Steps[j].Orphaned = step.Orphaned
+						if lines := sess.getFileLines(t.Steps[j].File); lines != nil {
+							anchor.PopulateTourStep(&t.Steps[j], lines)
 						}
 					}
+					updated = append(updated, *t)
 				}
-				if err := s.store.UpdateTours(sess.projectID, msg.Tours); err != nil {
-					log.Printf("failed to update reanchored tours: %v", err)
+				if len(updated) > 0 {
+					if err := s.store.UpdateTours(sess.projectID, updated); err != nil {
+						log.Printf("failed to update reanchored tours: %v", err)
+					}
+					s.broadcastTours(r.Context(), sess)
 				}
-				s.broadcastTours(r.Context(), sess)
 			}
 
 		case protocol.TypeSetRole:
