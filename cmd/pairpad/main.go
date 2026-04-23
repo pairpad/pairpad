@@ -66,7 +66,7 @@ func cmdLocal() {
 	dir := fs.StringP("dir", "d", ".", "Project directory")
 	newSession := fs.Bool("new", false, "Start a new session (default: continue previous)")
 	sessionID := fs.String("session", "", "Resume a specific session ID")
-	password := fs.StringP("password", "p", "", "Require password to join session")
+	password := fs.StringP("password", "p", envOrDefault("PAIRPAD_PASSWORD", ""), "Require password to join session (prefer PAIRPAD_PASSWORD env var)")
 	noBrowser := fs.Bool("no-browser", false, "Don't open browser automatically")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Run relay + daemon together in one process. Zero configuration needed.
@@ -141,7 +141,7 @@ func cmdConnect() {
 	dir := fs.StringP("dir", "d", ".", "Project directory")
 	newSession := fs.Bool("new", false, "Start a new session (default: continue previous)")
 	sessionID := fs.String("session", "", "Resume a specific session ID")
-	password := fs.StringP("password", "p", "", "Require password to join session")
+	password := fs.StringP("password", "p", envOrDefault("PAIRPAD_PASSWORD", ""), "Require password to join session (prefer PAIRPAD_PASSWORD env var)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Connect this project to a remote relay server.
 Continues the previous session by default. Use --new for a fresh session.
