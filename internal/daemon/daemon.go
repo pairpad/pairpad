@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,8 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pairpad/pairpad/internal/protocol"
 	"github.com/coder/websocket"
+	"github.com/pairpad/pairpad/internal/protocol"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Config holds the daemon configuration.
@@ -119,8 +118,11 @@ func (d *Daemon) connectAndServe(ctx context.Context, events <-chan watcherEvent
 	// Hash password if set
 	var passwordHash string
 	if d.cfg.Password != "" {
-		h := sha256.Sum256([]byte(d.cfg.Password))
-		passwordHash = hex.EncodeToString(h[:])
+		hash, err := bcrypt.GenerateFromPassword([]byte(d.cfg.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("failed to hash password: %w", err)
+		}
+		passwordHash = string(hash)
 	}
 
 	if err := d.send(ctx, conn, protocol.TypeProjectConnect, protocol.ProjectConnect{

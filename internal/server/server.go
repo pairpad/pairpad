@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"fmt"
@@ -15,13 +14,13 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/pairpad/pairpad/internal/anchor"
 	"github.com/pairpad/pairpad/internal/protocol"
 	"github.com/pairpad/pairpad/internal/storage"
-	"github.com/coder/websocket"
+	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed static
@@ -386,7 +385,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 					sess.mu.RLock()
 					expected := sess.passwordHash
 					sess.mu.RUnlock()
-					if msg.Password != "" && hashPassword(msg.Password) == expected {
+					if msg.Password != "" && checkPassword(msg.Password, expected) {
 						authenticated = true
 						break
 					}
@@ -1029,9 +1028,8 @@ func (s *Server) broadcastParticipants(ctx context.Context, sess *session) {
 	}
 }
 
-func hashPassword(password string) string {
-	h := sha256.Sum256([]byte(password))
-	return hex.EncodeToString(h[:])
+func checkPassword(password, hash string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
 func aOrAn(word string) string {
