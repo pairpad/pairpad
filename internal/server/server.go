@@ -82,7 +82,7 @@ func (s *Server) Run() error {
 
 	srv := &http.Server{
 		Addr:    s.cfg.Addr,
-		Handler: mux,
+		Handler: securityHeaders(mux),
 	}
 
 	go func() {
@@ -1071,6 +1071,15 @@ func generateID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func clientIP(r *http.Request) string {
