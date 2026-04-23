@@ -437,7 +437,7 @@ function renderParticipants(list) {
 
     const dot = document.createElement('span');
     dot.className = 'participant-dot';
-    dot.style.background = p.color;
+    dot.style.background = safeColor(p.color);
 
     const name = document.createElement('span');
     name.className = 'participant-name';
@@ -534,7 +534,7 @@ function renderFileTreePresence() {
       if (matchesTreeItem(item, cursor.file)) {
         const dot = document.createElement('span');
         dot.className = 'tree-presence';
-        dot.style.background = cursor.color;
+        dot.style.background = safeColor(cursor.color);
         item.appendChild(dot);
         break;
       }
@@ -1299,7 +1299,6 @@ function renderCommentFeed() {
 
     const deleteBtn = document.createElement('button');
     deleteBtn.textContent = 'Delete';
-    deleteBtn.style.color = 'var(--error)';
     deleteBtn.addEventListener('click', () => {
       if (confirm('Delete this comment and all replies?')) {
         send('comment_delete', { comment_id: root.id });
@@ -1339,7 +1338,7 @@ function renderCommentEntry(comment) {
   const header = document.createElement('div');
   const author = document.createElement('span');
   author.className = 'comment-author';
-  author.style.color = comment.color;
+  author.style.color = safeColor(comment.color);
   author.textContent = comment.author;
   header.appendChild(author);
 
@@ -1492,7 +1491,7 @@ function showToast(comment) {
   toast.className = 'toast';
   const toastAuthor = document.createElement('span');
   toastAuthor.className = 'toast-author';
-  toastAuthor.style.color = comment.color;
+  toastAuthor.style.color = safeColor(comment.color);
   toastAuthor.textContent = comment.author;
   toast.appendChild(toastAuthor);
   toast.appendChild(document.createTextNode(' commented'));
@@ -1732,16 +1731,16 @@ function updateGuideUI() {
     const totalOthers = participants.length - 1;
     const countText = totalOthers > 0 ? ` (${followCount}/${totalOthers} following)` : '';
     bannerText.textContent = `You are guiding this session${countText}`;
-    banner.style.background = myColor + '22';
-    banner.style.borderColor = myColor;
+    banner.style.background = safeColor(myColor) + '22';
+    banner.style.borderColor = safeColor(myColor);
     followBtn.style.display = 'none';
   } else if (guideName && guideName !== userName) {
     btn.style.display = 'none';
     banner.style.display = 'flex';
     bannerText.textContent = `${guideName} is guiding`;
-    bannerText.style.color = guideColor;
-    banner.style.background = guideColor + '22';
-    banner.style.borderColor = guideColor;
+    bannerText.style.color = safeColor(guideColor);
+    banner.style.background = safeColor(guideColor) + '22';
+    banner.style.borderColor = safeColor(guideColor);
     followBtn.style.display = '';
     followBtn.textContent = following ? 'Unfollow' : 'Follow';
     followBtn.classList.toggle('active', following);
@@ -2237,6 +2236,9 @@ function escapeAttr(s) {
 }
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function safeColor(c) {
+  return /^#[0-9a-fA-F]{6}$/.test(c) ? c : 'inherit';
 }
 
 // --- Share URL ---
