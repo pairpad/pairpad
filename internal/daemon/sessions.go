@@ -73,7 +73,7 @@ func saveSession(projectID, sessionID, hostToken string) {
 	if err != nil {
 		return
 	}
-	os.WriteFile(filepath.Join(dir, projectID+".json"), data, 0o644)
+	os.WriteFile(filepath.Join(dir, projectID+".json"), data, 0o600)
 }
 
 func generateSessionID() string {
