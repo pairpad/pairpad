@@ -423,6 +423,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		if env.Type == protocol.TypeIdentify {
 			var msg protocol.Identify
 			if err := protocol.DecodePayload(env, &msg); err == nil && msg.Name != "" {
+				msg.Name = truncate(msg.Name, maxNameLen)
 				sess.identifyBrowser(conn, msg.Name, msg.HostToken)
 				s.logActivity(r.Context(), sess,
 					fmt.Sprintf("participant_join name=%s role=%s session=%s", msg.Name, p.role, sessionID),
@@ -508,6 +509,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
+			msg.Path = truncate(msg.Path, maxPathLen)
 			p := sess.getParticipantByConn(conn)
 			pName := "unknown"
 			if p != nil { pName = p.name }
@@ -530,6 +532,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
+			msg.Path = truncate(msg.Path, maxPathLen)
 			// Optimistic concurrency: reject if file changed since editor loaded it
 			if msg.BaseHash != "" {
 				currentHash := sess.getFileHash(msg.Path)
@@ -582,10 +585,10 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				ID:           generateID(),
 				Author:       p.name,
 				Color:        p.color,
-				File:         msg.File,
+				File:         truncate(msg.File, maxPathLen),
 				Line:         msg.Line,
 				LineEnd:      msg.LineEnd,
-				Body:         msg.Body,
+				Body:         truncate(msg.Body, maxBodyLen),
 				Timestamp:    time.Now().UnixMilli(),
 				SymbolPath:   msg.SymbolPath,
 				SymbolOffset: msg.SymbolOffset,
@@ -635,7 +638,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				File:      parent.File,
 				Line:      parent.Line,
 				LineEnd:   parent.LineEnd,
-				Body:      msg.Body,
+				Body:      truncate(msg.Body, maxBodyLen),
 				Timestamp: time.Now().UnixMilli(),
 			}
 			if err := s.store.SaveComment(sess.projectID, reply); err != nil {
@@ -693,8 +696,13 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			if err := protocol.DecodePayload(env, &tour); err != nil {
 				continue
 			}
+			tour.Title = truncate(tour.Title, maxTitleLen)
+			tour.Description = truncate(tour.Description, maxBodyLen)
 			// Populate anchors from file cache
 			for i := range tour.Steps {
+				tour.Steps[i].Title = truncate(tour.Steps[i].Title, maxTitleLen)
+				tour.Steps[i].Description = truncate(tour.Steps[i].Description, maxBodyLen)
+				tour.Steps[i].File = truncate(tour.Steps[i].File, maxPathLen)
 				if lines := sess.getFileLines(tour.Steps[i].File); lines != nil {
 					anchor.PopulateTourStep(&tour.Steps[i], lines)
 				}
@@ -782,8 +790,14 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypeSearchRequest:
-			// Relay to daemon
-			sess.writeToDaemon(r.Context(), data)
+			var msg protocol.SearchRequest
+			if err := protocol.DecodePayload(env, &msg); err != nil {
+				continue
+			}
+			msg.Query = truncate(msg.Query, maxPathLen)
+			if searchData, err := protocol.Encode(protocol.TypeSearchRequest, msg); err == nil {
+				sess.writeToDaemon(r.Context(), searchData)
+			}
 
 		case protocol.TypeReanchor:
 			// Browser has re-parsed files and computed corrected positions.
@@ -1030,6 +1044,20 @@ func (s *Server) broadcastParticipants(ctx context.Context, sess *session) {
 
 func checkPassword(password, hash string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+const (
+	maxNameLen  = 64
+	maxTitleLen = 256
+	maxBodyLen  = 10240
+	maxPathLen  = 1024
+)
+
+func truncate(s string, max int) string {
+	if len(s) > max {
+		return s[:max]
+	}
+	return s
 }
 
 func aOrAn(word string) string {
