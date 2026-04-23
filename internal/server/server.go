@@ -41,6 +41,7 @@ type Server struct {
 	cfg            Config
 	store          *storage.DB
 	originPatterns []string
+	ipLimit        *ipLimiter
 	mu             sync.RWMutex
 	sessions       map[string]*session
 }
@@ -60,6 +61,7 @@ func New(cfg Config) (*Server, error) {
 		cfg:            cfg,
 		store:          store,
 		originPatterns: deriveOriginPatterns(cfg.PublicURL),
+		ipLimit:        newIPLimiter(10),
 		sessions:       make(map[string]*session),
 	}, nil
 }
@@ -292,8 +294,14 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	rateLimited := !s.ipLimit.acquire(ip)
+
 	sessionID := r.URL.Query().Get("session")
 	if sessionID == "" {
+		if rateLimited {
+			s.ipLimit.release(ip)
+		}
 		http.Error(w, "missing session parameter", http.StatusBadRequest)
 		return
 	}
@@ -302,6 +310,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
+		if rateLimited {
+			s.ipLimit.release(ip)
+		}
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -310,10 +321,18 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		OriginPatterns: s.originPatterns,
 	})
 	if err != nil {
+		if rateLimited {
+			s.ipLimit.release(ip)
+		}
 		log.Printf("browser websocket accept: %v", err)
 		return
 	}
 	defer conn.CloseNow()
+	if rateLimited {
+		conn.Close(websocket.StatusTryAgainLater, "too many connections from your address")
+		return
+	}
+	defer s.ipLimit.release(ip)
 	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
 	p := sess.addBrowser(conn)
@@ -345,6 +364,8 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 
 		// Wait for session_auth
 		authenticated := false
+		attempts := 0
+		const maxAttempts = 5
 		for {
 			_, data, err := conn.Read(r.Context())
 			if err != nil {
@@ -369,6 +390,15 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 						authenticated = true
 						break
 					}
+					attempts++
+					if attempts >= maxAttempts {
+						if errData, err := protocol.Encode(protocol.TypeError, protocol.Error{Message: "Too many attempts"}); err == nil {
+							conn.Write(r.Context(), websocket.MessageText, errData)
+						}
+						return
+					}
+					// Exponential backoff: 1s, 2s, 4s, 8s
+					time.Sleep(time.Duration(1<<(attempts-1)) * time.Second)
 					// Wrong password — send error
 					if errData, err := protocol.Encode(protocol.TypeError, protocol.Error{Message: "Wrong password"}); err == nil {
 						conn.Write(r.Context(), websocket.MessageText, errData)
@@ -453,11 +483,18 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.mu.RUnlock()
 
+	// Rate limit: 50 messages/sec burst, refills at 20/sec
+	limiter := newConnLimiter(50, 20)
+
 	// Read messages from browser and relay to daemon
 	for {
 		_, data, err := conn.Read(r.Context())
 		if err != nil {
 			return
+		}
+
+		if !limiter.allow() {
+			continue
 		}
 
 		env, err := protocol.Decode(data)
@@ -1008,6 +1045,20 @@ func generateID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func clientIP(r *http.Request) string {
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		if i := strings.IndexByte(fwd, ','); i > 0 {
+			return strings.TrimSpace(fwd[:i])
+		}
+		return strings.TrimSpace(fwd)
+	}
+	host := r.RemoteAddr
+	if i := strings.LastIndex(host, ":"); i > 0 {
+		return host[:i]
+	}
+	return host
 }
 
 func deriveOriginPatterns(publicURL string) []string {

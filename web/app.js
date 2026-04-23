@@ -135,15 +135,25 @@ window.joinSession = function() {
   };
 
   ws.onclose = (e) => {
+    if (e.code === 1013) {
+      // Rate limited — show reason without reconnect loop
+      const banner = document.getElementById('reconnect-banner');
+      banner.textContent = e.reason || 'Too many connections. Close some tabs and try again.';
+      banner.style.display = 'block';
+      setStatus('Connection refused');
+      return;
+    }
     if (document.getElementById('ide').style.display === 'flex') {
       // Already in a session — try to reconnect
       document.getElementById('reconnect-banner').style.display = 'block';
       setStatus('Reconnecting...');
       setTimeout(() => reconnect(), 2000);
     } else {
-      err.textContent = e.code === 1006
-        ? 'Could not connect to relay. Is it running?'
-        : 'Session not found. Check the session ID and try again.';
+      err.textContent = e.reason
+        ? e.reason
+        : e.code === 1006
+          ? 'Could not connect to relay. Is it running?'
+          : 'Session not found. Check the session ID and try again.';
       document.getElementById('step-name').style.display = 'none';
       document.getElementById('step-session').style.display = '';
     }
@@ -2278,7 +2288,13 @@ function reconnect() {
     sendCursorUpdate();
   };
 
-  ws.onclose = () => {
+  ws.onclose = (e) => {
+    if (e.code === 1013) {
+      document.getElementById('reconnect-banner').textContent =
+        e.reason || 'Too many connections. Close some tabs and try again.';
+      setStatus('Connection refused');
+      return;
+    }
     document.getElementById('reconnect-banner').style.display = 'block';
     document.getElementById('reconnect-banner').textContent =
       `Connection lost. Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`;
