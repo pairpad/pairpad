@@ -2263,7 +2263,14 @@ function reconnect() {
   reconnectAttempts++;
   if (reconnectAttempts > maxReconnectAttempts) {
     const banner = document.getElementById('reconnect-banner');
-    banner.innerHTML = 'Session expired. <a href="javascript:location.reload()" style="color:inherit;text-decoration:underline;">Reload</a> to reconnect when the host is back.';
+    banner.textContent = '';
+    banner.append('Session expired. ');
+    const link = document.createElement('a');
+    link.href = '#';
+    link.textContent = 'Reload';
+    link.style.cssText = 'color:inherit;text-decoration:underline';
+    link.addEventListener('click', (e) => { e.preventDefault(); location.reload(); });
+    banner.append(link, ' to reconnect when the host is back.');
     setStatus('Disconnected');
     return;
   }
