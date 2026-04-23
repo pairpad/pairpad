@@ -11,9 +11,23 @@ import (
 
 const maxFileSize = 5 * 1024 * 1024 // 5MB
 
-// isWithinDir checks that absPath is within the given directory.
+// isWithinDir checks that absPath is within the given directory,
+// resolving symlinks to prevent escaping via symlinked paths.
 func isWithinDir(absPath, dir string) bool {
-	return strings.HasPrefix(absPath, dir+string(filepath.Separator)) || absPath == dir
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		// Path doesn't exist yet (e.g. new file write) — check the parent
+		resolved, err = filepath.EvalSymlinks(filepath.Dir(absPath))
+		if err != nil {
+			return false
+		}
+		resolved = filepath.Join(resolved, filepath.Base(absPath))
+	}
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(resolved, resolvedDir+string(filepath.Separator)) || resolved == resolvedDir
 }
 
 // scanTree walks the project directory and returns a list of file entries,

@@ -233,7 +233,11 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		if d.ignore.shouldIgnore(msg.Path) {
 			return nil
 		}
-		return os.Remove(fmt.Sprintf("%s/%s", d.cfg.ProjectDir, msg.Path))
+		absPath := filepath.Join(d.cfg.ProjectDir, msg.Path)
+		if !isWithinDir(absPath, d.cfg.ProjectDir) {
+			return fs.ErrPermission
+		}
+		return os.Remove(absPath)
 
 	case protocol.TypeSearchRequest:
 		var msg protocol.SearchRequest
