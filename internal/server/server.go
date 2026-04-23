@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os/signal"
 	"strings"
 	"sync"
@@ -37,10 +38,11 @@ type Config struct {
 // Server is the Pairpad backend that relays messages between daemons and
 // browser clients.
 type Server struct {
-	cfg      Config
-	store    *storage.DB
-	mu       sync.RWMutex
-	sessions map[string]*session
+	cfg            Config
+	store          *storage.DB
+	originPatterns []string
+	mu             sync.RWMutex
+	sessions       map[string]*session
 }
 
 // New creates a new Server.
@@ -55,9 +57,10 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	return &Server{
-		cfg:      cfg,
-		store:    store,
-		sessions: make(map[string]*session),
+		cfg:            cfg,
+		store:          store,
+		originPatterns: deriveOriginPatterns(cfg.PublicURL),
+		sessions:       make(map[string]*session),
 	}, nil
 }
 
@@ -93,7 +96,7 @@ func (s *Server) Run() error {
 
 func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+		OriginPatterns: s.originPatterns,
 	})
 	if err != nil {
 		log.Printf("daemon websocket accept: %v", err)
@@ -298,7 +301,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+		OriginPatterns: s.originPatterns,
 	})
 	if err != nil {
 		log.Printf("browser websocket accept: %v", err)
@@ -973,4 +976,16 @@ func generateID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func deriveOriginPatterns(publicURL string) []string {
+	u, err := url.Parse(publicURL)
+	if err != nil || u.Host == "" {
+		return []string{"localhost:*", "127.0.0.1:*", "[::1]:*"}
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return []string{"localhost:*", "127.0.0.1:*", "[::1]:*"}
+	}
+	return []string{host, "*." + host}
 }
