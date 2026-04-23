@@ -133,7 +133,15 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	sess, reconnecting := s.sessions[sessionID]
 	if reconnecting {
-		// Reconnection to in-memory session: update daemon connection
+		// Verify host token before allowing reconnection
+		sess.mu.RLock()
+		validToken := sess.hostToken == msg.HostToken
+		sess.mu.RUnlock()
+		if !validToken {
+			s.mu.Unlock()
+			conn.Close(websocket.StatusPolicyViolation, "invalid host token")
+			return
+		}
 		sess.mu.Lock()
 		sess.daemon = conn
 		sess.passwordHash = msg.PasswordHash
