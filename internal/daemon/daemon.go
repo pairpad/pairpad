@@ -135,7 +135,7 @@ func (d *Daemon) connectAndServe(ctx context.Context, events <-chan watcherEvent
 	}); err != nil {
 		return err
 	}
-	fmt.Printf("pairpad: project %s (session %s)\n", d.project.Name, d.sessionID[:12])
+	fmt.Printf("pairpad: project %s (session %s)\n", d.project.Name, d.sessionID)
 
 	// Send initial file tree
 	if err := d.sendFileTree(ctx, conn); err != nil {

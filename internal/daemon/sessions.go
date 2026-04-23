@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -77,7 +77,7 @@ func saveSession(projectID, sessionID, hostToken string) {
 }
 
 func generateSessionID() string {
-	b := make([]byte, 12)
+	b := make([]byte, 8)
 	rand.Read(b)
-	return hex.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }

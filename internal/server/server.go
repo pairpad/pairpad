@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"embed"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
 	"io/fs"
 	"log"
@@ -148,7 +148,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 		sess.passwordHash = msg.PasswordHash
 		sess.mu.Unlock()
 		s.store.TouchSession(sessionID)
-		log.Printf("[session=%s] session_resume project=%s", sessionID[:12], msg.Name)
+		log.Printf("[session=%s] session_resume project=%s", sessionID, msg.Name)
 	} else {
 		// Not in memory — check max-sessions before creating
 		if s.cfg.MaxSessions > 0 && len(s.sessions) >= s.cfg.MaxSessions {
@@ -164,14 +164,14 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			sess.passwordHash = msg.PasswordHash
 			s.sessions[sessionID] = sess
 			s.store.TouchSession(sessionID)
-			log.Printf("[session=%s] session_restore project=%s", sessionID[:12], msg.Name)
+			log.Printf("[session=%s] session_restore project=%s", sessionID, msg.Name)
 		} else {
 			sess = newSession(sessionID, conn, msg.HostToken)
 			sess.projectID = msg.ProjectID
 			sess.passwordHash = msg.PasswordHash
 			s.sessions[sessionID] = sess
 			s.store.SaveSession(sessionID, msg.ProjectID, msg.HostToken, msg.PasswordHash)
-			log.Printf("[session=%s] session_start project=%s", sessionID[:12], msg.Name)
+			log.Printf("[session=%s] session_start project=%s", sessionID, msg.Name)
 		}
 	}
 	s.mu.Unlock()
@@ -179,7 +179,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		// Evict heavy caches immediately on disconnect
 		sess.evictCaches()
-		log.Printf("[session=%s] daemon_disconnect (grace=60s)", sessionID[:12])
+		log.Printf("[session=%s] daemon_disconnect (grace=60s)", sessionID)
 		// Notify browsers that daemon is gone
 		if statusData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: false}); err == nil {
 			sess.broadcastToBrowsers(r.Context(), statusData)
@@ -195,7 +195,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 				if daemonGone {
 					sess.closeAllBrowsers()
 					delete(s.sessions, sessionID)
-					log.Printf("[session=%s] session_expired (persisted in db)", sessionID[:12])
+					log.Printf("[session=%s] session_expired (persisted in db)", sessionID)
 				}
 			}
 			s.mu.Unlock()
@@ -348,7 +348,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("%s left", name))
 	}()
 
-	log.Printf("[session=%s] browser_connect", sessionID[:12])
+	log.Printf("[session=%s] browser_connect", sessionID)
 
 	// If session has a password, require it before identify
 	sess.mu.RLock()
@@ -1010,7 +1010,7 @@ func (s *Server) reanchorFile(ctx context.Context, sess *session, file string) {
 // message to the daemon for host-facing output.
 func (s *Server) logActivity(ctx context.Context, sess *session, relayMsg, daemonMsg string) {
 	// Structured relay log (for hosted service analytics)
-	log.Printf("[session=%s] %s", sess.id[:12], relayMsg)
+	log.Printf("[session=%s] %s", sess.id, relayMsg)
 
 	// Forward to daemon for host terminal
 	if daemonMsg != "" {
@@ -1080,7 +1080,7 @@ func aOrAn(word string) string {
 func generateID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
-	return hex.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func securityHeaders(next http.Handler) http.Handler {
