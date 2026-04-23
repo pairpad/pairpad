@@ -510,6 +510,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			msg.Path = truncate(msg.Path, maxPathLen)
+			if !isSafePath(msg.Path) {
+				continue
+			}
 			p := sess.getParticipantByConn(conn)
 			pName := "unknown"
 			if p != nil { pName = p.name }
@@ -533,6 +536,9 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			msg.Path = truncate(msg.Path, maxPathLen)
+			if !isSafePath(msg.Path) {
+				continue
+			}
 			// Optimistic concurrency: reject if file changed since editor loaded it
 			if msg.BaseHash != "" {
 				currentHash := sess.getFileHash(msg.Path)
@@ -1052,6 +1058,10 @@ const (
 	maxBodyLen  = 10240
 	maxPathLen  = 1024
 )
+
+func isSafePath(p string) bool {
+	return !strings.Contains(p, "..") && !strings.HasPrefix(p, "/")
+}
 
 func truncate(s string, max int) string {
 	if len(s) > max {
