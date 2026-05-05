@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os/signal"
@@ -52,7 +52,7 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	if err := store.DeleteStaleSessions(7 * 24 * time.Hour); err != nil {
-		log.Printf("failed to clean stale sessions: %v", err)
+		slog.Error("failed to clean stale sessions", "error", err)
 	}
 
 	return &Server{
@@ -103,7 +103,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.ipLimit.release(ip)
-		log.Printf("daemon websocket accept: %v", err)
+		slog.Debug("daemon_ws_accept_failed", "error", err)
 		return
 	}
 	defer conn.CloseNow()
@@ -135,7 +135,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 
 	// Create or load the project
 	if _, err := s.store.GetOrCreateProject(msg.ProjectID, msg.Name, msg.RemoteURL); err != nil {
-		log.Printf("failed to load/create project: %v", err)
+		slog.Error("failed to load/create project", "error", err)
 	}
 
 	// Check if this session already exists (daemon reconnecting)
@@ -148,6 +148,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 		sess.mu.RUnlock()
 		if !validToken {
 			s.mu.Unlock()
+			slog.Warn("daemon_auth_rejected", "session", sessionID, "reason", "invalid host token")
 			conn.Close(websocket.StatusPolicyViolation, "invalid host token")
 			return
 		}
@@ -156,7 +157,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 		sess.passwordHash = msg.PasswordHash
 		sess.mu.Unlock()
 		s.store.TouchSession(sessionID)
-		log.Printf("[session=%s] session_resume project=%s", sessionID, msg.Name)
+		slog.Info("session_resume", "session", sessionID, "project", msg.Name)
 	} else {
 		// Not in memory — check max-sessions before creating
 		if s.cfg.MaxSessions > 0 && len(s.sessions) >= s.cfg.MaxSessions {
@@ -172,14 +173,14 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			sess.passwordHash = msg.PasswordHash
 			s.sessions[sessionID] = sess
 			s.store.TouchSession(sessionID)
-			log.Printf("[session=%s] session_restore project=%s", sessionID, msg.Name)
+			slog.Info("session_restore", "session", sessionID, "project", msg.Name)
 		} else {
 			sess = newSession(sessionID, conn, msg.HostToken)
 			sess.projectID = msg.ProjectID
 			sess.passwordHash = msg.PasswordHash
 			s.sessions[sessionID] = sess
 			s.store.SaveSession(sessionID, msg.ProjectID, msg.HostToken, msg.PasswordHash)
-			log.Printf("[session=%s] session_start project=%s", sessionID, msg.Name)
+			slog.Info("session_start", "session", sessionID, "project", msg.Name)
 		}
 	}
 	s.mu.Unlock()
@@ -187,7 +188,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		// Evict heavy caches immediately on disconnect
 		sess.evictCaches()
-		log.Printf("[session=%s] daemon_disconnect (grace=60s)", sessionID)
+		slog.Info("daemon_disconnect", "session", sessionID, "grace", "60s")
 		// Notify browsers that daemon is gone
 		if statusData, err := protocol.Encode(protocol.TypeDaemonStatus, protocol.DaemonStatus{Connected: false}); err == nil {
 			sess.broadcastToBrowsers(r.Context(), statusData)
@@ -203,7 +204,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 				if daemonGone {
 					sess.closeAllBrowsers()
 					delete(s.sessions, sessionID)
-					log.Printf("[session=%s] session_expired (persisted in db)", sessionID)
+					slog.Info("session_expired", "session", sessionID)
 				}
 			}
 			s.mu.Unlock()
@@ -238,7 +239,7 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 
 		env, err := protocol.Decode(data)
 		if err != nil {
-			log.Printf("invalid daemon message: %v", err)
+			slog.Debug("invalid_daemon_message", "error", err)
 			continue
 		}
 
@@ -294,11 +295,11 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			// Log and ignore — daemon is reporting an error (e.g. can't read a file)
 			var msg protocol.Error
 			if err := protocol.DecodePayload(env, &msg); err == nil {
-				log.Printf("daemon error: %s", msg.Message)
+				slog.Debug("daemon_error", "message", msg.Message)
 			}
 
 		default:
-			log.Printf("unhandled daemon message: %s payload=%s", env.Type, string(env.Payload))
+			slog.Debug("unhandled_daemon_message", "type", env.Type)
 		}
 	}
 }
@@ -334,7 +335,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		if rateLimited {
 			s.ipLimit.release(ip)
 		}
-		log.Printf("browser websocket accept: %v", err)
+		slog.Debug("browser_ws_accept_failed", "error", err)
 		return
 	}
 	defer conn.CloseNow()
@@ -359,7 +360,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("%s left", name))
 	}()
 
-	log.Printf("[session=%s] browser_connect", sessionID)
+	slog.Info("browser_connect", "session", sessionID)
 
 	// If session has a password, require it before identify
 	sess.mu.RLock()
@@ -402,11 +403,13 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 					}
 					attempts++
 					if attempts >= maxAttempts {
+						slog.Warn("auth_lockout", "session", sessionID, "ip", ip, "attempts", attempts)
 						if errData, err := protocol.Encode(protocol.TypeError, protocol.Error{Message: "Too many attempts"}); err == nil {
 							conn.Write(r.Context(), websocket.MessageText, errData)
 						}
 						return
 					}
+					slog.Warn("auth_failed", "session", sessionID, "ip", ip, "attempt", attempts)
 					// Exponential backoff: 1s, 2s, 4s, 8s
 					time.Sleep(time.Duration(1<<(attempts-1)) * time.Second)
 					// Wrong password — send error
@@ -510,7 +513,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 
 		env, err := protocol.Decode(data)
 		if err != nil {
-			log.Printf("invalid browser message: %v", err)
+			slog.Debug("invalid_browser_message", "error", err)
 			continue
 		}
 
@@ -609,7 +612,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				AnchorContextEnd: msg.AnchorContextEnd,
 			}
 			if err := s.store.SaveComment(sess.projectID, comment); err != nil {
-				log.Printf("failed to save comment: %v", err)
+				slog.Error("failed to save comment", "error", err)
 				continue
 			}
 			s.broadcastComments(r.Context(), sess)
@@ -653,7 +656,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				Timestamp: time.Now().UnixMilli(),
 			}
 			if err := s.store.SaveComment(sess.projectID, reply); err != nil {
-				log.Printf("failed to save reply: %v", err)
+				slog.Error("failed to save reply", "error", err)
 				continue
 			}
 			s.broadcastComments(r.Context(), sess)
@@ -670,7 +673,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if err := s.store.ResolveComment(sess.projectID, msg.CommentID); err != nil {
-				log.Printf("failed to resolve comment: %v", err)
+				slog.Error("failed to resolve comment", "error", err)
 			}
 			p := sess.getParticipantByConn(conn)
 			pName := "unknown"
@@ -689,7 +692,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if err := s.store.DeleteComment(sess.projectID, msg.CommentID); err != nil {
-				log.Printf("failed to delete comment: %v", err)
+				slog.Error("failed to delete comment", "error", err)
 			}
 			p := sess.getParticipantByConn(conn)
 			pName := "unknown"
@@ -715,7 +718,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				tour.Steps[i].File = truncate(tour.Steps[i].File, maxPathLen)
 			}
 			if err := s.store.SaveTour(sess.projectID, tour); err != nil {
-				log.Printf("failed to save tour: %v", err)
+				slog.Error("failed to save tour", "error", err)
 				continue
 			}
 			p := sess.getParticipantByConn(conn)
@@ -735,7 +738,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if err := s.store.DeleteTour(msg.ID); err != nil {
-				log.Printf("failed to delete tour: %v", err)
+				slog.Error("failed to delete tour", "error", err)
 			}
 			p := sess.getParticipantByConn(conn)
 			pName := "unknown"
@@ -841,7 +844,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				}
 				if len(updated) > 0 {
 					if err := s.store.UpdateComments(sess.projectID, updated); err != nil {
-						log.Printf("failed to update reanchored comments: %v", err)
+						slog.Error("failed to update reanchored comments", "error", err)
 					}
 					s.broadcastComments(r.Context(), sess)
 				}
@@ -878,7 +881,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				}
 				if len(updated) > 0 {
 					if err := s.store.UpdateTours(sess.projectID, updated); err != nil {
-						log.Printf("failed to update reanchored tours: %v", err)
+						slog.Error("failed to update reanchored tours", "error", err)
 					}
 					s.broadcastTours(r.Context(), sess)
 				}
@@ -944,7 +947,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("%s %s the guide", p.name, action))
 
 		default:
-			log.Printf("unhandled browser message: %s payload=%s", env.Type, string(env.Payload))
+			slog.Debug("unhandled_browser_message", "type", env.Type)
 		}
 	}
 }
@@ -991,8 +994,7 @@ func (s *Server) broadcastTours(ctx context.Context, sess *session) {
 // logActivity logs a structured relay event and sends a human-readable
 // message to the daemon for host-facing output.
 func (s *Server) logActivity(ctx context.Context, sess *session, relayMsg, daemonMsg string) {
-	// Structured relay log (for hosted service analytics)
-	log.Printf("[session=%s] %s", sess.id, relayMsg)
+	slog.Info(relayMsg, "session", sess.id)
 
 	// Forward to daemon for host terminal
 	if daemonMsg != "" {
