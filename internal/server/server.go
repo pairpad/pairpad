@@ -512,9 +512,6 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			msg.Path = truncate(msg.Path, maxPathLen)
-			if !isSafePath(msg.Path) {
-				continue
-			}
 			p := sess.getParticipantByConn(conn)
 			pName := "unknown"
 			if p != nil { pName = p.name }
@@ -524,7 +521,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				sess.writeToDaemon(r.Context(), reqData)
 			}
 			s.logVerbose(r.Context(), sess,
-				fmt.Sprintf("%s opened %s", pName, msg.Path))
+				fmt.Sprintf("%s opened a file", pName))
 
 		case protocol.TypeCloseFile:
 			// Acknowledged, no action needed
@@ -538,9 +535,6 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			msg.Path = truncate(msg.Path, maxPathLen)
-			if !isSafePath(msg.Path) {
-				continue
-			}
 			// Optimistic concurrency: reject if file changed since editor loaded it
 			if msg.BaseHash != "" {
 				currentHash := sess.getFileHash(msg.Path)
@@ -566,8 +560,8 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				sess.writeToDaemon(r.Context(), writeData)
 			}
 			s.logActivity(r.Context(), sess,
-				fmt.Sprintf("file_save name=%s file=%s", pName, msg.Path),
-				fmt.Sprintf("%s saved %s", pName, msg.Path))
+				fmt.Sprintf("file_save name=%s", pName),
+				fmt.Sprintf("%s saved a file", pName))
 
 		case protocol.TypeCursorUpdate:
 			var msg protocol.CursorUpdate
@@ -611,8 +605,8 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 			s.broadcastComments(r.Context(), sess)
 			s.logActivity(r.Context(), sess,
-				fmt.Sprintf("comment_add author=%s file=%s line=%d", p.name, msg.File, msg.Line),
-				fmt.Sprintf("%s commented on %s:%d", p.name, msg.File, msg.Line))
+				fmt.Sprintf("comment_add author=%s line=%d", p.name, msg.Line),
+				fmt.Sprintf("%s commented on line %d", p.name, msg.Line))
 
 		case protocol.TypeCommentReply:
 			if !sess.hasRole(conn, protocol.RoleCommenter) {
@@ -655,8 +649,8 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 			s.broadcastComments(r.Context(), sess)
 			s.logActivity(r.Context(), sess,
-				fmt.Sprintf("comment_reply author=%s file=%s line=%d", p.name, parent.File, parent.Line),
-				fmt.Sprintf("%s replied on %s:%d", p.name, parent.File, parent.Line))
+				fmt.Sprintf("comment_reply author=%s line=%d", p.name, parent.Line),
+				fmt.Sprintf("%s replied on a comment", p.name))
 
 		case protocol.TypeCommentResolve:
 			if !sess.hasRole(conn, protocol.RoleCommenter) {
@@ -1037,10 +1031,6 @@ const (
 	maxBodyLen  = 16384
 	maxPathLen  = 1024
 )
-
-func isSafePath(p string) bool {
-	return !strings.Contains(p, "..") && !strings.HasPrefix(p, "/")
-}
 
 func truncate(s string, max int) string {
 	if len(s) > max {

@@ -26,6 +26,23 @@ let sessionPassword = null; // cached for reconnection
 let editorView = null;
 let encryptionSeed = null;
 let encKey = null;
+let pathMap = new Map(); // token -> realPath
+let reversePathMap = new Map(); // realPath -> token
+
+const messageQueue = [];
+let processingMessages = false;
+async function processMessageQueue() {
+  if (processingMessages) return;
+  processingMessages = true;
+  while (messageQueue.length > 0) {
+    try {
+      await handleMessage(messageQueue.shift());
+    } catch (e) {
+      console.error('Failed to handle message:', e);
+    }
+  }
+  processingMessages = false;
+}
 
 async function computeHash(content) {
   const data = new TextEncoder().encode(content);
@@ -97,6 +114,38 @@ async function decryptFields(arr) {
   return Promise.all(arr.map(s => decryptField(s)));
 }
 
+
+
+function toPathToken(realPath) {
+  return reversePathMap.get(realPath) || realPath;
+}
+
+function fromPathToken(token) {
+  return pathMap.get(token) || token;
+}
+
+async function decryptDisplayPath(encB64) {
+  // DisplayPath is base64url-encoded encrypted bytes
+  const b64 = encB64.replace(/-/g, '+').replace(/_/g, '/');
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  if (!encKey) return new TextDecoder().decode(bytes);
+  const nonce = bytes.slice(0, 12);
+  const ct = bytes.slice(12);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, encKey, ct);
+  return new TextDecoder().decode(plain);
+}
+
+async function decryptSearchContent(encB64) {
+  // Search content is base64url-encoded encrypted bytes
+  const b64 = encB64.replace(/-/g, '+').replace(/_/g, '/');
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  if (!encKey) return new TextDecoder().decode(bytes);
+  const nonce = bytes.slice(0, 12);
+  const ct = bytes.slice(12);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, encKey, ct);
+  return new TextDecoder().decode(plain);
+}
+
 // --- Connection (two-step: session ID, then name) ---
 
 window.submitSession = async function() {
@@ -125,7 +174,7 @@ window.submitSession = async function() {
 
   sessionId = input;
 
-  // Derive encryption key from seed before connecting
+  // Derive encryption key and HMAC key from seed before connecting
   if (encryptionSeed) {
     encKey = await deriveEncryptionKey(encryptionSeed);
   }
@@ -241,11 +290,8 @@ window.joinSession = function() {
   ws.onerror = () => {}; // onclose handles the error display
 
   ws.onmessage = (event) => {
-    try {
-      handleMessage(JSON.parse(event.data));
-    } catch (e) {
-      console.error('Failed to handle message:', e);
-    }
+    messageQueue.push(JSON.parse(event.data));
+    processMessageQueue();
   };
 };
 
@@ -282,6 +328,19 @@ async function handleMessage(envelope) {
 
   switch (envelope.type) {
     case 'search_results':
+      // Decrypt search result paths and content
+      for (const m of (payload.matches || [])) {
+        if (m.display_path) {
+          m.file = await decryptDisplayPath(m.display_path);
+        } else {
+          m.file = fromPathToken(m.file);
+        }
+        if (m.content && encKey) {
+          try {
+            m.content = await decryptSearchContent(m.content);
+          } catch { /* leave as-is if decryption fails */ }
+        }
+      }
       handleSearchResults(payload);
       break;
     case 'password_required':
@@ -345,11 +404,24 @@ async function handleMessage(envelope) {
         document.title = `Pairpad — ${payload.project_name}`;
       }
       break;
-    case 'file_tree':
-      fileTreeEntries = payload.files || [];
+    case 'file_tree': {
+      pathMap = new Map();
+      reversePathMap = new Map();
+      const entries = payload.files || [];
+      for (const entry of entries) {
+        if (entry.display_path) {
+          const realPath = await decryptDisplayPath(entry.display_path);
+          pathMap.set(entry.path, realPath);
+          reversePathMap.set(realPath, entry.path);
+          entry.path = realPath;
+        }
+      }
+      fileTreeEntries = entries;
       renderFileTree(fileTreeEntries);
       break;
+    }
     case 'file_content': {
+      payload.path = fromPathToken(payload.path);
       const content = await decryptContent(payload.content);
       openFiles.set(payload.path, content);
       computeHash(content).then(h => fileHashes.set(payload.path, h));
@@ -384,6 +456,7 @@ async function handleMessage(envelope) {
       break;
     }
     case 'file_changed': {
+      payload.path = fromPathToken(payload.path);
       const changed = await decryptContent(payload.content);
       const savedVersion = openFiles.get(payload.path);
       openFiles.set(payload.path, changed);
@@ -408,12 +481,21 @@ async function handleMessage(envelope) {
       break;
     }
     case 'save_rejected': {
+      payload.path = fromPathToken(payload.path);
       const current = await decryptContent(payload.content);
       showConflictBanner(payload.path, current);
       setStatus('Save rejected — file was modified');
       break;
     }
     case 'file_created': {
+      if (payload.display_path) {
+        const realPath = await decryptDisplayPath(payload.display_path);
+        pathMap.set(payload.path, realPath);
+        reversePathMap.set(realPath, payload.path);
+        payload.path = realPath;
+      } else {
+        payload.path = fromPathToken(payload.path);
+      }
       const content = await decryptContent(payload.content);
       openFiles.set(payload.path, content);
       // Add to file tree if not already there
@@ -423,7 +505,10 @@ async function handleMessage(envelope) {
       }
       break;
     }
-    case 'file_deleted':
+    case 'file_deleted': {
+      const deletedReal = fromPathToken(payload.path);
+      pathMap.delete(payload.path);
+      payload.path = deletedReal;
       openFiles.delete(payload.path);
       removeTab(payload.path);
       closeFileInEditor(payload.path);
@@ -435,11 +520,15 @@ async function handleMessage(envelope) {
         switchToLastTab();
       }
       break;
+    }
     case 'participant_list':
       renderParticipants(payload.participants);
       break;
     case 'cursor_state':
       cursorState = payload.cursors || [];
+      for (const c of cursorState) {
+        c.file = fromPathToken(c.file);
+      }
       renderFileTreePresence();
       renderParticipantLocations();
       renderPeerSelections();
@@ -447,6 +536,7 @@ async function handleMessage(envelope) {
     case 'comment_list': {
       const comments = payload.comments || [];
       for (const c of comments) {
+        c.file = fromPathToken(c.file);
         c.body = await decryptField(c.body);
         c.anchor_text = await decryptField(c.anchor_text);
         c.anchor_context = await decryptFields(c.anchor_context);
@@ -463,6 +553,7 @@ async function handleMessage(envelope) {
       handleGuideStop();
       break;
     case 'guide_state':
+      payload.file = fromPathToken(payload.file);
       handleGuideState(payload);
       break;
     case 'follow_status':
@@ -474,6 +565,7 @@ async function handleMessage(envelope) {
         t.title = await decryptField(t.title);
         t.description = await decryptField(t.description);
         for (const s of (t.steps || [])) {
+          s.file = fromPathToken(s.file);
           s.title = await decryptField(s.title);
           s.description = await decryptField(s.description);
           s.anchor_text = await decryptField(s.anchor_text);
@@ -594,7 +686,7 @@ function renderParticipantLocations() {
   }
 }
 
-function jumpToParticipant(name) {
+async function jumpToParticipant(name) {
   const cursor = cursorState.find(c => c.name === name);
   if (!cursor) return;
 
@@ -609,7 +701,7 @@ function jumpToParticipant(name) {
   } else {
     // Request the file, then scroll after it loads
     pendingScroll = { file: cursor.file, line: cursor.line };
-    send('open_file', { path: cursor.file });
+    send('open_file', { path: await toPathToken(cursor.file) });
   }
 }
 
@@ -764,8 +856,9 @@ async function reanchorAnnotationsForFile(file) {
       }
     }
 
-    // Encrypt anchor fields before sending
+    // Encrypt anchor fields and hash file paths before sending
     for (const c of updatedComments) {
+      c.file = await toPathToken(c.file);
       c.anchor_text = await encryptField(c.anchor_text);
       c.anchor_context = await encryptFields(c.anchor_context);
       c.anchor_text_end = await encryptField(c.anchor_text_end);
@@ -773,6 +866,7 @@ async function reanchorAnnotationsForFile(file) {
     }
     for (const tour of updatedTours) {
       for (const step of tour.steps) {
+        step.file = await toPathToken(step.file);
         step.anchor_text = await encryptField(step.anchor_text);
         step.anchor_context = await encryptFields(step.anchor_context);
         step.anchor_text_end = await encryptField(step.anchor_text_end);
@@ -1111,7 +1205,7 @@ function highlightFileInTree(path) {
 
 // --- File operations ---
 
-function openFile(path) {
+async function openFile(path) {
   activeFile = path;
   highlightFileInTree(path);
   updateBreadcrumb(path);
@@ -1127,7 +1221,7 @@ function openFile(path) {
       refreshTourMarkers();
     });
   } else {
-    send('open_file', { path });
+    send('open_file', { path: await toPathToken(path) });
   }
 }
 
@@ -1149,12 +1243,12 @@ function checkUnsaved() {
   }
 }
 
-function sendCursorUpdate() {
+async function sendCursorUpdate() {
   const file = getCurrentPath();
   if (!file) return;
   const sel = getSelectionLines();
   send('cursor_update', {
-    file,
+    file: await toPathToken(file),
     line: getCursorLine(),
     selection_from: sel ? sel.from : 0,
     selection_to: sel ? sel.to : 0,
@@ -1255,7 +1349,7 @@ async function saveFile() {
 
   openFiles.set(activeFile, content);
   const encoded = await encryptContent(content);
-  send('save_file', { path: activeFile, content: encoded, base_hash: fileHashes.get(activeFile) || '' });
+  send('save_file', { path: await toPathToken(activeFile), content: encoded, base_hash: fileHashes.get(activeFile) || '' });
   setStatus(`Saved ${activeFile}`);
   checkUnsaved();
 }
@@ -1394,7 +1488,7 @@ function renderCommentFeed() {
       lineInput.className = 'comment-reanchor-input';
       lineInput.value = root.line;
       lineInput.min = 1;
-      lineInput.addEventListener('keydown', (e) => {
+      lineInput.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
           const newLine = parseInt(lineInput.value, 10);
           if (!newLine || newLine < 1) return;
@@ -1402,6 +1496,7 @@ function renderCommentFeed() {
           const sym = v && getCurrentPath() === root.file ? getSymbolAtLine(v, newLine) : null;
           const updated = {
             ...root,
+            file: await toPathToken(root.file),
             line: newLine,
             orphaned: false,
             stale: false,
@@ -1512,7 +1607,7 @@ function renderCommentEntry(comment) {
   return entry;
 }
 
-function jumpToComment(comment) {
+async function jumpToComment(comment) {
   activeFile = comment.file;
   if (openFiles.has(comment.file)) {
     addTab(comment.file);
@@ -1522,7 +1617,7 @@ function jumpToComment(comment) {
     setStatus(comment.file);
   } else {
     pendingScroll = { file: comment.file, line: comment.line };
-    send('open_file', { path: comment.file });
+    send('open_file', { path: await toPathToken(comment.file) });
   }
 }
 
@@ -1617,6 +1712,7 @@ window.addCommentAtLine = function(line, lineEnd) {
       msg.anchor_context = await encryptFields(msg.anchor_context);
       msg.anchor_text_end = await encryptField(msg.anchor_text_end);
       msg.anchor_context_end = await encryptFields(msg.anchor_context_end);
+      msg.file = await toPathToken(msg.file);
       send('comment_add', msg);
       tempInput.remove();
     }
@@ -1773,7 +1869,7 @@ function handleGuideState(state) {
   }
 }
 
-function applyGuideState(state) {
+async function applyGuideState(state) {
   suppressBreakAway = true;
   setTimeout(() => { suppressBreakAway = false; }, 200);
 
@@ -1818,7 +1914,7 @@ function applyGuideState(state) {
     } else {
       // Request the file, then apply guide state after it loads
       pendingGuideState = state;
-      send('open_file', { path: state.file });
+      send('open_file', { path: await toPathToken(state.file) });
       return;
     }
   }
@@ -1872,12 +1968,12 @@ let guideStateRaf = null;
 function broadcastGuideState() {
   if (!guideActive) return;
   cancelAnimationFrame(guideStateRaf);
-  guideStateRaf = requestAnimationFrame(() => {
+  guideStateRaf = requestAnimationFrame(async () => {
     const file = getCurrentPath();
     if (!file) return;
     const sel = getSelectionLines();
     const state = {
-      file,
+      file: await toPathToken(file),
       top_line: getTopVisibleLine(),
       cursor_line: getCursorLine(),
       selection_from: sel ? sel.from : 0,
@@ -2025,7 +2121,7 @@ window.tourNext = function() {
   goToTourStep(activeTourStep + 1);
 };
 
-function goToTourStep(idx) {
+async function goToTourStep(idx) {
   if (!activeTour || idx < 0 || idx >= activeTour.steps.length) return;
   activeTourStep = idx;
   const step = activeTour.steps[idx];
@@ -2060,7 +2156,7 @@ function goToTourStep(idx) {
     });
   } else {
     pendingTourStep = idx;
-    send('open_file', { path: step.file });
+    send('open_file', { path: await toPathToken(step.file) });
   }
 }
 
@@ -2286,7 +2382,7 @@ function renderNewTourSteps() {
     });
   });
   container.querySelectorAll('.step-goto').forEach(el => {
-    el.addEventListener('click', (e) => {
+    el.addEventListener('click', async (e) => {
       const idx = parseInt(e.target.dataset.idx);
       const step = newTourSteps[idx];
       if (!step) return;
@@ -2300,7 +2396,7 @@ function renderNewTourSteps() {
         requestAnimationFrame(() => refreshCreationMarkers());
       } else {
         pendingScroll = { file: step.file, line: step.line };
-        send('open_file', { path: step.file });
+        send('open_file', { path: await toPathToken(step.file) });
       }
     });
   });
@@ -2372,6 +2468,7 @@ window.saveTour = async function() {
   tour.title = await encryptField(tour.title);
   tour.description = await encryptField(tour.description);
   for (const step of tour.steps) {
+    step.file = await toPathToken(step.file);
     step.title = await encryptField(step.title);
     step.description = await encryptField(step.description);
     step.anchor_text = await encryptField(step.anchor_text);
@@ -2523,11 +2620,8 @@ function reconnect() {
   ws.onerror = () => {};
 
   ws.onmessage = (event) => {
-    try {
-      handleMessage(JSON.parse(event.data));
-    } catch (e) {
-      console.error('Failed to handle message:', e);
-    }
+    messageQueue.push(JSON.parse(event.data));
+    processMessageQueue();
   };
 }
 
@@ -2676,7 +2770,7 @@ function highlightSearchResult(index) {
   if (active) active.scrollIntoView({ block: 'nearest' });
 }
 
-function openSearchResult(match) {
+async function openSearchResult(match) {
   activeFile = match.file;
   if (openFiles.has(match.file)) {
     addTab(match.file);
@@ -2688,7 +2782,7 @@ function openSearchResult(match) {
     setStatus(match.file);
   } else {
     pendingScroll = { file: match.file, line: match.line_number };
-    send('open_file', { path: match.file });
+    send('open_file', { path: await toPathToken(match.file) });
   }
 }
 

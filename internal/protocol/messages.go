@@ -90,10 +90,11 @@ type Envelope struct {
 
 // FileEntry represents a single file in the project tree.
 type FileEntry struct {
-	Path    string    `json:"path"`
-	Size    int64     `json:"size"`
-	ModTime time.Time `json:"mod_time"`
-	IsDir   bool      `json:"is_dir"`
+	Path        string    `json:"path"`
+	DisplayPath string    `json:"display_path,omitempty"`
+	Size        int64     `json:"size"`
+	ModTime     time.Time `json:"mod_time"`
+	IsDir       bool      `json:"is_dir"`
 }
 
 // FileTree is sent by the daemon on connect and when the tree changes.
@@ -120,6 +121,7 @@ type FileCreated struct {
 	Path        string `json:"path"`
 	Content     []byte `json:"content"`
 	ContentHash string `json:"content_hash,omitempty"`
+	DisplayPath string `json:"display_path,omitempty"`
 }
 
 // FileDeleted is sent by the daemon when a local file is removed.
@@ -364,9 +366,10 @@ type SearchRequest struct {
 
 // SearchMatch is a single search result.
 type SearchMatch struct {
-	File       string `json:"file"`
-	LineNumber int    `json:"line_number"`
-	Content    string `json:"content"`
+	File        string `json:"file"`
+	DisplayPath string `json:"display_path,omitempty"`
+	LineNumber  int    `json:"line_number"`
+	Content     string `json:"content"`
 }
 
 // SearchResults is sent back to the browser with matching lines.
