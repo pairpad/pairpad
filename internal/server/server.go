@@ -110,10 +110,12 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 	defer s.ipLimit.release(ip)
 	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
-	// Wait for project_connect from daemon to get session ID
+	// Wait for project_connect from daemon (timeout: 10s)
+	handshakeCtx, handshakeCancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer handshakeCancel()
 	var msg protocol.ProjectConnect
 	for {
-		_, data, err := conn.Read(r.Context())
+		_, data, err := conn.Read(handshakeCtx)
 		if err != nil {
 			return
 		}
