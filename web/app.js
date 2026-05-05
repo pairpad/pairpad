@@ -65,6 +65,38 @@ async function decryptContent(b64) {
   return new TextDecoder().decode(plain);
 }
 
+async function encryptField(str) {
+  if (!encKey || !str) return str;
+  const data = new TextEncoder().encode(str);
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, encKey, data);
+  const result = new Uint8Array(nonce.length + ct.byteLength);
+  result.set(nonce);
+  result.set(new Uint8Array(ct), nonce.length);
+  return btoa(result.reduce((s, b) => s + String.fromCharCode(b), ''));
+}
+
+async function decryptField(str) {
+  if (!encKey || !str) return str;
+  try {
+    const bytes = Uint8Array.from(atob(str), c => c.charCodeAt(0));
+    const nonce = bytes.slice(0, 12);
+    const ct = bytes.slice(12);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, encKey, ct);
+    return new TextDecoder().decode(plain);
+  } catch { return str; }
+}
+
+async function encryptFields(arr) {
+  if (!encKey || !arr) return arr;
+  return Promise.all(arr.map(s => encryptField(s)));
+}
+
+async function decryptFields(arr) {
+  if (!encKey || !arr) return arr;
+  return Promise.all(arr.map(s => decryptField(s)));
+}
+
 // --- Connection (two-step: session ID, then name) ---
 
 window.submitSession = async function() {
@@ -412,9 +444,18 @@ async function handleMessage(envelope) {
       renderParticipantLocations();
       renderPeerSelections();
       break;
-    case 'comment_list':
-      handleCommentList(payload.comments || []);
+    case 'comment_list': {
+      const comments = payload.comments || [];
+      for (const c of comments) {
+        c.body = await decryptField(c.body);
+        c.anchor_text = await decryptField(c.anchor_text);
+        c.anchor_context = await decryptFields(c.anchor_context);
+        c.anchor_text_end = await decryptField(c.anchor_text_end);
+        c.anchor_context_end = await decryptFields(c.anchor_context_end);
+      }
+      handleCommentList(comments);
       break;
+    }
     case 'guide_start':
       handleGuideStart(payload);
       break;
@@ -427,9 +468,23 @@ async function handleMessage(envelope) {
     case 'follow_status':
       handleFollowStatus(payload);
       break;
-    case 'tour_list':
-      handleTourList(payload.tours || []);
+    case 'tour_list': {
+      const tours = payload.tours || [];
+      for (const t of tours) {
+        t.title = await decryptField(t.title);
+        t.description = await decryptField(t.description);
+        for (const s of (t.steps || [])) {
+          s.title = await decryptField(s.title);
+          s.description = await decryptField(s.description);
+          s.anchor_text = await decryptField(s.anchor_text);
+          s.anchor_context = await decryptFields(s.anchor_context);
+          s.anchor_text_end = await decryptField(s.anchor_text_end);
+          s.anchor_context_end = await decryptFields(s.anchor_context_end);
+        }
+      }
+      handleTourList(tours);
       break;
+    }
   }
 }
 
@@ -618,7 +673,7 @@ function matchesTreeItem(item, filePath) {
 
 // --- AST Re-anchoring ---
 
-function reanchorAnnotationsForFile(file) {
+async function reanchorAnnotationsForFile(file) {
   const v = getView();
   if (!v) return;
 
@@ -706,6 +761,22 @@ function reanchorAnnotationsForFile(file) {
             step.anchor_context_end = fileLines.slice(start, end);
           }
         }
+      }
+    }
+
+    // Encrypt anchor fields before sending
+    for (const c of updatedComments) {
+      c.anchor_text = await encryptField(c.anchor_text);
+      c.anchor_context = await encryptFields(c.anchor_context);
+      c.anchor_text_end = await encryptField(c.anchor_text_end);
+      c.anchor_context_end = await encryptFields(c.anchor_context_end);
+    }
+    for (const tour of updatedTours) {
+      for (const step of tour.steps) {
+        step.anchor_text = await encryptField(step.anchor_text);
+        step.anchor_context = await encryptFields(step.anchor_context);
+        step.anchor_text_end = await encryptField(step.anchor_text_end);
+        step.anchor_context_end = await encryptFields(step.anchor_context_end);
       }
     }
 
@@ -1397,9 +1468,9 @@ function renderCommentFeed() {
     replyInput.style.display = 'none';
     const input = document.createElement('input');
     input.placeholder = 'Write a reply...';
-    input.addEventListener('keydown', (e) => {
+    input.addEventListener('keydown', async (e) => {
       if (e.key === 'Enter' && input.value.trim()) {
-        send('comment_reply', { parent_id: root.id, body: input.value.trim() });
+        send('comment_reply', { parent_id: root.id, body: await encryptField(input.value.trim()) });
         input.value = '';
         replyInput.style.display = 'none';
       }
@@ -1515,7 +1586,7 @@ window.addCommentAtLine = function(line, lineEnd) {
   const input = document.createElement('input');
   input.placeholder = 'Write a comment...';
   input.style.cssText = 'width:100%;background:#313244;border:1px solid #45475a;color:#cdd6f4;padding:6px 8px;border-radius:4px;font-size:12px;outline:none;';
-  input.addEventListener('keydown', (e) => {
+  input.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter' && input.value.trim()) {
       const sym = getSymbolAtLine(getView(), line);
       const msg = {
@@ -1541,6 +1612,11 @@ window.addCommentAtLine = function(line, lineEnd) {
           msg.anchor_context_end = lines.slice(start, end);
         }
       }
+      msg.body = await encryptField(msg.body);
+      msg.anchor_text = await encryptField(msg.anchor_text);
+      msg.anchor_context = await encryptFields(msg.anchor_context);
+      msg.anchor_text_end = await encryptField(msg.anchor_text_end);
+      msg.anchor_context_end = await encryptFields(msg.anchor_context_end);
       send('comment_add', msg);
       tempInput.remove();
     }
@@ -2252,7 +2328,7 @@ function refreshCreationMarkers() {
   updateTourMarkers(steps);
 }
 
-window.saveTour = function() {
+window.saveTour = async function() {
   const title = document.getElementById('new-tour-title')?.value.trim();
   if (!title) {
     document.getElementById('new-tour-title').focus();
@@ -2292,6 +2368,17 @@ window.saveTour = function() {
       return step;
     }),
   };
+
+  tour.title = await encryptField(tour.title);
+  tour.description = await encryptField(tour.description);
+  for (const step of tour.steps) {
+    step.title = await encryptField(step.title);
+    step.description = await encryptField(step.description);
+    step.anchor_text = await encryptField(step.anchor_text);
+    step.anchor_context = await encryptFields(step.anchor_context);
+    step.anchor_text_end = await encryptField(step.anchor_text_end);
+    step.anchor_context_end = await encryptFields(step.anchor_context_end);
+  }
 
   pendingTourSelect = tour.id;
   send('tour_save', tour);

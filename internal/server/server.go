@@ -1034,7 +1034,7 @@ func checkPassword(password, hash string) bool {
 const (
 	maxNameLen  = 64
 	maxTitleLen = 256
-	maxBodyLen  = 10240
+	maxBodyLen  = 16384
 	maxPathLen  = 1024
 )
 
