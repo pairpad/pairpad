@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/pairpad/pairpad/internal/anchor"
 	"github.com/pairpad/pairpad/internal/protocol"
 	"github.com/pairpad/pairpad/internal/storage"
 	"golang.org/x/crypto/bcrypt"
@@ -249,25 +248,28 @@ func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case protocol.TypeFileContent:
-			// Cache file content for anchor operations
 			var msg protocol.FileContent
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
 			sess.cacheFileContent(msg.Path, msg.Content)
+			if msg.ContentHash != "" {
+				sess.setFileHash(msg.Path, msg.ContentHash)
+			}
 			// Route to the browser that requested it, not everyone
 			if requester := sess.resolveFileRequest(msg.Path); requester != nil {
 				requester.Write(r.Context(), websocket.MessageText, data)
 			}
 
 		case protocol.TypeFileChanged, protocol.TypeFileCreated:
-			// Cache updated content, re-anchor, and broadcast to browsers
 			var msg protocol.FileContent
 			if err := protocol.DecodePayload(env, &msg); err != nil {
 				continue
 			}
 			sess.cacheFileContent(msg.Path, msg.Content)
-			s.reanchorFile(r.Context(), sess, msg.Path)
+			if msg.ContentHash != "" {
+				sess.setFileHash(msg.Path, msg.ContentHash)
+			}
 			sess.broadcastToBrowsers(r.Context(), data)
 
 		case protocol.TypeFileDeleted,
@@ -588,20 +590,20 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			comment := protocol.Comment{
-				ID:           generateID(),
-				Author:       p.name,
-				Color:        p.color,
-				File:         truncate(msg.File, maxPathLen),
-				Line:         msg.Line,
-				LineEnd:      msg.LineEnd,
-				Body:         truncate(msg.Body, maxBodyLen),
-				Timestamp:    time.Now().UnixMilli(),
-				SymbolPath:   msg.SymbolPath,
-				SymbolOffset: msg.SymbolOffset,
-			}
-			// Populate anchor from file cache
-			if lines := sess.getFileLines(msg.File); lines != nil {
-				anchor.PopulateComment(&comment, lines)
+				ID:               generateID(),
+				Author:           p.name,
+				Color:            p.color,
+				File:             truncate(msg.File, maxPathLen),
+				Line:             msg.Line,
+				LineEnd:          msg.LineEnd,
+				Body:             truncate(msg.Body, maxBodyLen),
+				Timestamp:        time.Now().UnixMilli(),
+				SymbolPath:       msg.SymbolPath,
+				SymbolOffset:     msg.SymbolOffset,
+				AnchorText:       msg.AnchorText,
+				AnchorContext:    msg.AnchorContext,
+				AnchorTextEnd:    msg.AnchorTextEnd,
+				AnchorContextEnd: msg.AnchorContextEnd,
 			}
 			if err := s.store.SaveComment(sess.projectID, comment); err != nil {
 				log.Printf("failed to save comment: %v", err)
@@ -704,14 +706,10 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 			}
 			tour.Title = truncate(tour.Title, maxTitleLen)
 			tour.Description = truncate(tour.Description, maxBodyLen)
-			// Populate anchors from file cache
 			for i := range tour.Steps {
 				tour.Steps[i].Title = truncate(tour.Steps[i].Title, maxTitleLen)
 				tour.Steps[i].Description = truncate(tour.Steps[i].Description, maxBodyLen)
 				tour.Steps[i].File = truncate(tour.Steps[i].File, maxPathLen)
-				if lines := sess.getFileLines(tour.Steps[i].File); lines != nil {
-					anchor.PopulateTourStep(&tour.Steps[i], lines)
-				}
 			}
 			if err := s.store.SaveTour(sess.projectID, tour); err != nil {
 				log.Printf("failed to save tour: %v", err)
@@ -832,9 +830,10 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 					c.SymbolOffset = incoming.SymbolOffset
 					c.Stale = incoming.Stale
 					c.Orphaned = incoming.Orphaned
-					if lines := sess.getFileLines(c.File); lines != nil {
-						anchor.PopulateComment(c, lines)
-					}
+					c.AnchorText = incoming.AnchorText
+					c.AnchorContext = incoming.AnchorContext
+					c.AnchorTextEnd = incoming.AnchorTextEnd
+					c.AnchorContextEnd = incoming.AnchorContextEnd
 					updated = append(updated, *c)
 				}
 				if len(updated) > 0 {
@@ -867,9 +866,10 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 						t.Steps[j].SymbolOffset = step.SymbolOffset
 						t.Steps[j].Stale = step.Stale
 						t.Steps[j].Orphaned = step.Orphaned
-						if lines := sess.getFileLines(t.Steps[j].File); lines != nil {
-							anchor.PopulateTourStep(&t.Steps[j], lines)
-						}
+						t.Steps[j].AnchorText = step.AnchorText
+						t.Steps[j].AnchorContext = step.AnchorContext
+						t.Steps[j].AnchorTextEnd = step.AnchorTextEnd
+						t.Steps[j].AnchorContextEnd = step.AnchorContextEnd
 					}
 					updated = append(updated, *t)
 				}
@@ -982,27 +982,6 @@ func (s *Server) broadcastTours(ctx context.Context, sess *session) {
 	data, err := protocol.Encode(protocol.TypeTourList, protocol.TourList{Tours: tours})
 	if err == nil {
 		sess.broadcastToBrowsers(ctx, data)
-	}
-}
-
-func (s *Server) reanchorFile(ctx context.Context, sess *session, file string) {
-	lines := sess.getFileLines(file)
-	if lines == nil {
-		return
-	}
-
-	// Re-anchor comments
-	comments, err := s.store.GetComments(sess.projectID)
-	if err == nil && anchor.ReanchorComments(comments, file, lines) {
-		s.store.UpdateComments(sess.projectID, comments)
-		s.broadcastComments(ctx, sess)
-	}
-
-	// Re-anchor tours
-	tours, err := s.store.GetTours(sess.projectID)
-	if err == nil && anchor.ReanchorTourSteps(tours, file, lines) {
-		s.store.UpdateTours(sess.projectID, tours)
-		s.broadcastTours(ctx, sess)
 	}
 }
 

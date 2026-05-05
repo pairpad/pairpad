@@ -24,6 +24,8 @@ let myRole = null;
 let hostToken = null;
 let sessionPassword = null; // cached for reconnection
 let editorView = null;
+let encryptionSeed = null;
+let encKey = null;
 
 async function computeHash(content) {
   const data = new TextEncoder().encode(content);
@@ -31,9 +33,41 @@ async function computeHash(content) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function deriveEncryptionKey(seedB64) {
+  const seed = Uint8Array.from(atob(seedB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  const baseKey = await crypto.subtle.importKey('raw', seed, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode('pairpad-e2e') },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function encryptContent(plaintext) {
+  if (!encKey) return btoa(new TextEncoder().encode(plaintext).reduce((s, b) => s + String.fromCharCode(b), ''));
+  const data = new TextEncoder().encode(plaintext);
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, encKey, data);
+  const result = new Uint8Array(nonce.length + ct.byteLength);
+  result.set(nonce);
+  result.set(new Uint8Array(ct), nonce.length);
+  return btoa(result.reduce((s, b) => s + String.fromCharCode(b), ''));
+}
+
+async function decryptContent(b64) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  if (!encKey) return new TextDecoder().decode(bytes);
+  const nonce = bytes.slice(0, 12);
+  const ct = bytes.slice(12);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, encKey, ct);
+  return new TextDecoder().decode(plain);
+}
+
 // --- Connection (two-step: session ID, then name) ---
 
-window.submitSession = function() {
+window.submitSession = async function() {
   let input = document.getElementById('session-input').value.trim();
   if (!input) return;
 
@@ -50,7 +84,20 @@ window.submitSession = function() {
     hostToken = params.get('host') || null;
   }
 
+  // Extract encryption seed if present (e.g. "sessionid,seed")
+  if (input.includes(',')) {
+    const parts = input.split(',');
+    input = parts[0];
+    encryptionSeed = parts[1];
+  }
+
   sessionId = input;
+
+  // Derive encryption key from seed before connecting
+  if (encryptionSeed) {
+    encKey = await deriveEncryptionKey(encryptionSeed);
+  }
+
   document.getElementById('connect-error').textContent = '';
 
   // Move to name step
@@ -198,7 +245,7 @@ window.submitPassword = function() {
 
 // --- Message handling ---
 
-function handleMessage(envelope) {
+async function handleMessage(envelope) {
   const payload = JSON.parse(atob(envelope.payload));
 
   switch (envelope.type) {
@@ -271,7 +318,7 @@ function handleMessage(envelope) {
       renderFileTree(fileTreeEntries);
       break;
     case 'file_content': {
-      const content = decodeContent(payload.content);
+      const content = await decryptContent(payload.content);
       openFiles.set(payload.path, content);
       computeHash(content).then(h => fileHashes.set(payload.path, h));
       addTab(payload.path);
@@ -305,7 +352,7 @@ function handleMessage(envelope) {
       break;
     }
     case 'file_changed': {
-      const changed = decodeContent(payload.content);
+      const changed = await decryptContent(payload.content);
       const savedVersion = openFiles.get(payload.path);
       openFiles.set(payload.path, changed);
       // If the editor has unsaved local edits for this file, don't
@@ -329,13 +376,13 @@ function handleMessage(envelope) {
       break;
     }
     case 'save_rejected': {
-      const current = decodeContent(payload.content);
+      const current = await decryptContent(payload.content);
       showConflictBanner(payload.path, current);
       setStatus('Save rejected — file was modified');
       break;
     }
     case 'file_created': {
-      const content = decodeContent(payload.content);
+      const content = await decryptContent(payload.content);
       openFiles.set(payload.path, content);
       // Add to file tree if not already there
       if (!fileTreeEntries.some(f => f.path === payload.path)) {
@@ -386,9 +433,8 @@ function handleMessage(envelope) {
   }
 }
 
-function decodeContent(b64) {
-  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+async function decodeContent(b64) {
+  return decryptContent(b64);
 }
 
 // --- Participants ---
@@ -625,8 +671,45 @@ function reanchorAnnotationsForFile(file) {
     }
   }
 
-  // Send corrected annotations to relay
+  // Populate anchor context from local plaintext for updated annotations
   if (changed) {
+    const fileContent = openFiles.get(file);
+    if (fileContent) {
+      const fileLines = fileContent.split('\n');
+      for (const c of updatedComments) {
+        if (c.line >= 1 && c.line <= fileLines.length) {
+          c.anchor_text = fileLines[c.line - 1];
+          const start = Math.max(0, c.line - 1 - 2);
+          const end = Math.min(fileLines.length, c.line - 1 + 3);
+          c.anchor_context = fileLines.slice(start, end);
+        }
+        if (c.line_end && c.line_end > c.line && c.line_end <= fileLines.length) {
+          c.anchor_text_end = fileLines[c.line_end - 1];
+          const start = Math.max(0, c.line_end - 1 - 2);
+          const end = Math.min(fileLines.length, c.line_end - 1 + 3);
+          c.anchor_context_end = fileLines.slice(start, end);
+        }
+      }
+      for (const tour of updatedTours) {
+        for (const step of tour.steps) {
+          if (step.file !== file) continue;
+          if (step.line >= 1 && step.line <= fileLines.length) {
+            step.anchor_text = fileLines[step.line - 1];
+            const start = Math.max(0, step.line - 1 - 2);
+            const end = Math.min(fileLines.length, step.line - 1 + 3);
+            step.anchor_context = fileLines.slice(start, end);
+          }
+          if (step.line_end && step.line_end > step.line && step.line_end <= fileLines.length) {
+            step.anchor_text_end = fileLines[step.line_end - 1];
+            const start = Math.max(0, step.line_end - 1 - 2);
+            const end = Math.min(fileLines.length, step.line_end - 1 + 3);
+            step.anchor_context_end = fileLines.slice(start, end);
+          }
+        }
+      }
+    }
+
+    // Send corrected annotations to relay
     const msg = {};
     if (updatedComments.length > 0) msg.comments = updatedComments;
     if (updatedTours.length > 0) msg.tours = updatedTours;
@@ -1093,14 +1176,14 @@ function removeTab(path) {
 
 // --- Save ---
 
-function saveFile() {
+async function saveFile() {
   if (!activeFile) return;
   if (myRole !== 'host' && myRole !== 'editor') return;
   const content = getEditorContent();
   if (content == null) return;
 
   openFiles.set(activeFile, content);
-  const encoded = btoa(new TextEncoder().encode(content).reduce((s, b) => s + String.fromCharCode(b), ''));
+  const encoded = await encryptContent(content);
   send('save_file', { path: activeFile, content: encoded, base_hash: fileHashes.get(activeFile) || '' });
   setStatus(`Saved ${activeFile}`);
   checkUnsaved();
@@ -1435,12 +1518,30 @@ window.addCommentAtLine = function(line, lineEnd) {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && input.value.trim()) {
       const sym = getSymbolAtLine(getView(), line);
-      send('comment_add', {
+      const msg = {
         file, line, line_end: lineEnd || 0,
         body: input.value.trim(),
         symbol_path: sym ? sym.symbolPath : '',
         symbol_offset: sym ? sym.symbolOffset : 0,
-      });
+      };
+      // Populate anchor context from local plaintext
+      const fileContent = openFiles.get(file);
+      if (fileContent) {
+        const lines = fileContent.split('\n');
+        if (line >= 1 && line <= lines.length) {
+          msg.anchor_text = lines[line - 1];
+          const start = Math.max(0, line - 1 - 2);
+          const end = Math.min(lines.length, line - 1 + 3);
+          msg.anchor_context = lines.slice(start, end);
+        }
+        if (lineEnd && lineEnd > line && lineEnd <= lines.length) {
+          msg.anchor_text_end = lines[lineEnd - 1];
+          const start = Math.max(0, lineEnd - 1 - 2);
+          const end = Math.min(lines.length, lineEnd - 1 + 3);
+          msg.anchor_context_end = lines.slice(start, end);
+        }
+      }
+      send('comment_add', msg);
       tempInput.remove();
     }
     if (e.key === 'Escape') {
@@ -2163,13 +2264,33 @@ window.saveTour = function() {
     id: editingTourId || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
     title,
     description: document.getElementById('new-tour-desc')?.value.trim() || '',
-    steps: newTourSteps.map(s => ({
-      file: s.file,
-      line: s.line,
-      line_end: s.line_end || 0,
-      title: s.title || `Step at ${formatLocation(s.file, s.line, s.line_end)}`,
-      description: s.description || '',
-    })),
+    steps: newTourSteps.map(s => {
+      const step = {
+        file: s.file,
+        line: s.line,
+        line_end: s.line_end || 0,
+        title: s.title || `Step at ${formatLocation(s.file, s.line, s.line_end)}`,
+        description: s.description || '',
+      };
+      // Populate anchor context from local plaintext
+      const fileContent = openFiles.get(s.file);
+      if (fileContent) {
+        const lines = fileContent.split('\n');
+        if (s.line >= 1 && s.line <= lines.length) {
+          step.anchor_text = lines[s.line - 1];
+          const start = Math.max(0, s.line - 1 - 2);
+          const end = Math.min(lines.length, s.line - 1 + 3);
+          step.anchor_context = lines.slice(start, end);
+        }
+        if (s.line_end && s.line_end > s.line && s.line_end <= lines.length) {
+          step.anchor_text_end = lines[s.line_end - 1];
+          const start = Math.max(0, s.line_end - 1 - 2);
+          const end = Math.min(lines.length, s.line_end - 1 + 3);
+          step.anchor_context_end = lines.slice(start, end);
+        }
+      }
+      return step;
+    }),
   };
 
   pendingTourSelect = tour.id;
@@ -2244,8 +2365,9 @@ function safeColor(c) {
 // --- Share URL ---
 
 window.copySessionURL = function() {
-  // Build collaborator URL (session hash without host token)
-  const url = `${location.protocol}//${location.host}/#${sessionId}`;
+  // Build collaborator URL (session hash with encryption seed, without host token)
+  const seedPart = encryptionSeed ? `,${encryptionSeed}` : '';
+  const url = `${location.protocol}//${location.host}/#${sessionId}${seedPart}`;
   navigator.clipboard.writeText(url).then(() => {
     const btn = document.getElementById('share-btn');
     const orig = btn.textContent;

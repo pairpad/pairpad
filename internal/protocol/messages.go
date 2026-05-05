@@ -103,20 +103,23 @@ type FileTree struct {
 
 // FileContent carries a file's contents, used for initial load and updates.
 type FileContent struct {
-	Path    string `json:"path"`
-	Content []byte `json:"content"`
+	Path        string `json:"path"`
+	Content     []byte `json:"content"`
+	ContentHash string `json:"content_hash,omitempty"`
 }
 
 // FileChanged is sent by the daemon when a local file is modified.
 type FileChanged struct {
-	Path    string `json:"path"`
-	Content []byte `json:"content"`
+	Path        string `json:"path"`
+	Content     []byte `json:"content"`
+	ContentHash string `json:"content_hash,omitempty"`
 }
 
 // FileCreated is sent by the daemon when a new file appears locally.
 type FileCreated struct {
-	Path    string `json:"path"`
-	Content []byte `json:"content"`
+	Path        string `json:"path"`
+	Content     []byte `json:"content"`
+	ContentHash string `json:"content_hash,omitempty"`
 }
 
 // FileDeleted is sent by the daemon when a local file is removed.
@@ -233,14 +236,18 @@ type CursorState struct {
 // CommentAdd is sent by a browser to create a new comment thread.
 // Author and Color are populated by the server before relaying to the daemon.
 type CommentAdd struct {
-	File         string `json:"file"`
-	Line         int    `json:"line"`
-	LineEnd      int    `json:"line_end,omitempty"`
-	Body         string `json:"body"`
-	Author       string `json:"author,omitempty"`
-	Color        string `json:"color,omitempty"`
-	SymbolPath   string `json:"symbol_path,omitempty"`
-	SymbolOffset int    `json:"symbol_offset,omitempty"`
+	File             string   `json:"file"`
+	Line             int      `json:"line"`
+	LineEnd          int      `json:"line_end,omitempty"`
+	Body             string   `json:"body"`
+	Author           string   `json:"author,omitempty"`
+	Color            string   `json:"color,omitempty"`
+	SymbolPath       string   `json:"symbol_path,omitempty"`
+	SymbolOffset     int      `json:"symbol_offset,omitempty"`
+	AnchorText       string   `json:"anchor_text,omitempty"`
+	AnchorContext    []string `json:"anchor_context,omitempty"`
+	AnchorTextEnd    string   `json:"anchor_text_end,omitempty"`
+	AnchorContextEnd []string `json:"anchor_context_end,omitempty"`
 }
 
 // CommentReply is sent by a browser to reply to an existing comment.

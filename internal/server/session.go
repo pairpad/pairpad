@@ -2,13 +2,10 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"strings"
 	"sync"
 
-	"github.com/pairpad/pairpad/internal/protocol"
 	"github.com/coder/websocket"
+	"github.com/pairpad/pairpad/internal/protocol"
 )
 
 // Colors assigned to participants in join order (Catppuccin Frappe palette).
@@ -57,9 +54,10 @@ type session struct {
 	// pendingFiles tracks which browser requested which file, so
 	// file_content responses are routed only to the requester.
 	pendingFiles map[string]*websocket.Conn // path -> requesting conn
-	// fileCache stores latest file contents for anchor operations.
+	// fileCache stores latest file contents (encrypted) for cache operations.
 	// Transient — gone when session ends.
-	fileCache    map[string][]byte // path -> content
+	fileCache    map[string][]byte  // path -> encrypted content
+	fileHashes   map[string]string  // path -> plaintext content hash from daemon
 }
 
 func newSession(id string, daemon *websocket.Conn, hostToken string) *session {
@@ -70,6 +68,7 @@ func newSession(id string, daemon *websocket.Conn, hostToken string) *session {
 		participants:  make(map[*websocket.Conn]*participant),
 		pendingFiles: make(map[string]*websocket.Conn),
 		fileCache:    make(map[string][]byte),
+		fileHashes:   make(map[string]string),
 	}
 }
 
@@ -225,22 +224,13 @@ func (s *session) getCachedContent(path string) []byte {
 func (s *session) getFileHash(path string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	content, ok := s.fileCache[path]
-	if !ok {
-		return ""
-	}
-	h := sha256.Sum256(content)
-	return hex.EncodeToString(h[:])
+	return s.fileHashes[path]
 }
 
-func (s *session) getFileLines(path string) []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	content, ok := s.fileCache[path]
-	if !ok {
-		return nil
-	}
-	return strings.Split(string(content), "\n")
+func (s *session) setFileHash(path, hash string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fileHashes[path] = hash
 }
 
 func (s *session) setFileTree(files []protocol.FileEntry) {
@@ -271,6 +261,7 @@ func (s *session) evictCaches() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fileCache = make(map[string][]byte)
+	s.fileHashes = make(map[string]string)
 	s.fileTree = nil
 	s.pendingFiles = make(map[string]*websocket.Conn)
 	s.guideActive = false

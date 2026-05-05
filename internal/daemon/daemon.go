@@ -2,8 +2,15 @@ package daemon
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -16,6 +23,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/pairpad/pairpad/internal/protocol"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/hkdf"
 )
 
 // Config holds the daemon configuration.
@@ -30,12 +38,14 @@ type Config struct {
 
 // Daemon connects the local filesystem to the Pairpad server.
 type Daemon struct {
-	cfg           Config
-	ignore        *ignoreMatcher
-	project       projectInfo
-	sessionID     string
-	hostToken     string
-	everConnected bool
+	cfg            Config
+	ignore         *ignoreMatcher
+	project        projectInfo
+	sessionID      string
+	hostToken      string
+	encryptionSeed string
+	encKey         []byte
+	everConnected  bool
 }
 
 // New creates a new Daemon with the given configuration.
@@ -46,20 +56,31 @@ func New(cfg Config) (*Daemon, error) {
 	}
 
 	project := detectProject(cfg.ProjectDir)
-	var sessionID, hostToken string
+	var sessionID, hostToken, encryptionSeed string
 	if cfg.SessionID != "" {
 		sessionID = cfg.SessionID
-		_, hostToken = loadSession(project.ID, false)
+		_, hostToken, encryptionSeed = loadSession(project.ID, false)
 	} else {
-		sessionID, hostToken = loadSession(project.ID, cfg.NewSession)
+		sessionID, hostToken, encryptionSeed = loadSession(project.ID, cfg.NewSession)
+	}
+
+	seedBytes, err := base64.RawURLEncoding.DecodeString(encryptionSeed)
+	if err != nil {
+		return nil, fmt.Errorf("invalid encryption seed: %w", err)
+	}
+	encKey, err := deriveKey(seedBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive encryption key: %w", err)
 	}
 
 	return &Daemon{
-		cfg:       cfg,
-		ignore:    newIgnoreMatcher(cfg.ProjectDir),
-		project:   project,
-		sessionID: sessionID,
-		hostToken: hostToken,
+		cfg:            cfg,
+		ignore:         newIgnoreMatcher(cfg.ProjectDir),
+		project:        project,
+		sessionID:      sessionID,
+		hostToken:      hostToken,
+		encryptionSeed: encryptionSeed,
+		encKey:         encKey,
 	}, nil
 }
 
@@ -215,9 +236,15 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 				Message: fmt.Sprintf("cannot read %s: %v", msg.Path, err),
 			})
 		}
+		h := sha256.Sum256(content)
+		encrypted, err := encryptContent(d.encKey, content)
+		if err != nil {
+			return err
+		}
 		return d.send(ctx, conn, protocol.TypeFileContent, protocol.FileContent{
-			Path:    msg.Path,
-			Content: content,
+			Path:        msg.Path,
+			Content:     encrypted,
+			ContentHash: hex.EncodeToString(h[:]),
 		})
 
 	case protocol.TypeWriteFile:
@@ -225,7 +252,11 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		if err := protocol.DecodePayload(env, &msg); err != nil {
 			return err
 		}
-		return writeFile(d.cfg.ProjectDir, msg.Path, msg.Content, d.ignore)
+		plaintext, err := decryptContent(d.encKey, msg.Content)
+		if err != nil {
+			return err
+		}
+		return writeFile(d.cfg.ProjectDir, msg.Path, plaintext, d.ignore)
 
 	case protocol.TypeDeleteFile:
 		var msg protocol.DeleteFile
@@ -260,11 +291,16 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		if err := protocol.DecodePayload(env, &msg); err != nil {
 			return err
 		}
+		// Append encryption seed to URL fragment
+		joinURL := msg.JoinURL
+		if d.encryptionSeed != "" {
+			joinURL = joinURL + "," + d.encryptionSeed
+		}
 		// Print host URL (with token) for the daemon owner
-		hostURL := msg.JoinURL + "?host=" + msg.HostToken
+		hostURL := joinURL + "?host=" + msg.HostToken
 		fmt.Printf("\n  Session is ready!\n\n")
 		fmt.Printf("  Host (you):    %s\n", hostURL)
-		fmt.Printf("  Collaborators: %s\n\n", msg.JoinURL)
+		fmt.Printf("  Collaborators: %s\n\n", joinURL)
 		if d.cfg.OnReady != nil {
 			d.cfg.OnReady(hostURL)
 		}
@@ -295,9 +331,15 @@ func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event 
 			return nil
 		}
 
+		h := sha256.Sum256(content)
+		encrypted, err := encryptContent(d.encKey, content)
+		if err != nil {
+			return err
+		}
 		return d.send(ctx, conn, event.Type, protocol.FileContent{
-			Path:    event.RelPath,
-			Content: content,
+			Path:        event.RelPath,
+			Content:     encrypted,
+			ContentHash: hex.EncodeToString(h[:]),
 		})
 
 	case protocol.TypeFileDeleted:
@@ -373,6 +415,48 @@ func (d *Daemon) send(ctx context.Context, conn *websocket.Conn, msgType protoco
 		return err
 	}
 	return conn.Write(ctx, websocket.MessageText, data)
+}
+
+func deriveKey(seed []byte) ([]byte, error) {
+	r := hkdf.New(sha256.New, seed, nil, []byte("pairpad-e2e"))
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(r, key); err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+func encryptContent(key, plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+func decryptContent(key, ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	nonce, ct := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	return gcm.Open(nil, nonce, ct, nil)
 }
 
 
