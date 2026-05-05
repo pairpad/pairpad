@@ -93,14 +93,21 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) handleDaemon(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	if !s.ipLimit.acquire(ip) {
+		http.Error(w, "too many connections", http.StatusTooManyRequests)
+		return
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: s.originPatterns,
 	})
 	if err != nil {
+		s.ipLimit.release(ip)
 		log.Printf("daemon websocket accept: %v", err)
 		return
 	}
 	defer conn.CloseNow()
+	defer s.ipLimit.release(ip)
 	conn.SetReadLimit(10 * 1024 * 1024) // 10MB
 
 	// Wait for project_connect from daemon to get session ID
