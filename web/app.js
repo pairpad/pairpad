@@ -1521,7 +1521,7 @@ function renderCommentFeed() {
     for (const reply of threadReplies) {
       const replyEl = renderCommentEntry(reply);
       replyEl.style.paddingLeft = '12px';
-      replyEl.style.borderLeft = `2px solid ${reply.color}`;
+      replyEl.style.borderLeft = `2px solid ${safeColor(reply.color)}`;
       replyEl.style.marginLeft = '8px';
       thread.appendChild(replyEl);
     }
