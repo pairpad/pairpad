@@ -137,7 +137,7 @@ Commands:
 Common flags:
   -a, --addr        Listen address (default :8080)
   -d, --dir         Project directory (default .)
-  -s, --server      Relay URL for connect (default ws://localhost:8080)
+  -s, --server      Relay URL for connect (default wss://pairpad.dev)
   -p, --password    Require password to join session
       --new         Start a new session (default: continue previous)
       --session     Resume a specific session ID
@@ -166,13 +166,18 @@ The relay handles TLS via autocert (Let's Encrypt) when listening on :443. Use `
 
 Data is stored in `~/.local/share/pairpad/pairpad.db` (SQLite).
 
-## Building
+## Install
+
+Download the latest binary from the [releases page](https://github.com/pairpad/pairpad/releases/latest), or build from source:
 
 ```bash
-make build      # Build the binary
-make local      # Build and run locally
-make relay      # Build and run relay only
-make connect    # Build and run daemon only
+# With Go installed
+go install github.com/pairpad/pairpad/cmd/pairpad@latest
+
+# Or clone and build
+git clone https://github.com/pairpad/pairpad.git
+cd pairpad
+make build
 ```
 
 ## License
