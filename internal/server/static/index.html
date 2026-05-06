@@ -68,6 +68,16 @@
       font-size: 15px;
       margin-bottom: 32px;
     }
+    #connect-box .install-hint {
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-top: 24px;
+    }
+    #connect-box .install-hint a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    #connect-box .install-hint a:hover { text-decoration: underline; }
     #connect-box .input-row {
       display: flex;
       gap: 8px;
@@ -865,6 +875,7 @@
       </div>
 
       <div id="connect-error"></div>
+      <p class="install-hint">Need the daemon? <a href="https://github.com/pairpad/pairpad" target="_blank">Install pairpad</a></p>
     </div>
   </div>
 

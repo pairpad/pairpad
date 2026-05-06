@@ -50,11 +50,16 @@ func printUsage() {
 Usage: pairpad <command> [flags]
 
 Commands:
-  local       Run everything locally (relay + daemon, opens browser)
-  connect     Connect this project to a remote relay
-  relay       Run the relay server
+  connect     Connect this project to pairpad.dev (or a self-hosted relay)
+  local       Run everything locally — no server needed
+  relay       Run a self-hosted relay server
   version     Print version information
   help        Show this help
+
+Quick start:
+  pairpad connect              Share the current directory via pairpad.dev
+  pairpad connect --dir ~/src  Share a specific directory
+  pairpad local                Try it locally first (opens browser)
 
 Run 'pairpad <command> --help' for details on each command.
 `)
@@ -137,7 +142,7 @@ Flags:
 
 func cmdConnect() {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
-	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "ws://localhost:8080"), "Relay server URL")
+	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "wss://pairpad.dev"), "Relay server URL")
 	dir := fs.StringP("dir", "d", ".", "Project directory")
 	newSession := fs.Bool("new", false, "Start a new session (default: continue previous)")
 	sessionID := fs.String("session", "", "Resume a specific session ID")
