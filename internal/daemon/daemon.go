@@ -317,7 +317,15 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 	case protocol.TypeActivity:
 		var msg protocol.Activity
 		if err := protocol.DecodePayload(env, &msg); err == nil {
-			fmt.Printf("  > %s\n", msg.Message)
+			parts := strings.SplitN(msg.Message, "\t", 2)
+			display := parts[0]
+			if len(parts) == 2 && strings.HasPrefix(parts[1], "file:") {
+				token := strings.TrimPrefix(parts[1], "file:")
+				if path, ok := d.tokenToPath[token]; ok {
+					display = strings.Replace(display, "a file", path, 1)
+				}
+			}
+			fmt.Printf("  > %s\n", display)
 		}
 
 	case protocol.TypeSessionReady:

@@ -533,7 +533,7 @@ func (s *Server) handleBrowser(w http.ResponseWriter, r *http.Request) {
 				sess.writeToDaemon(r.Context(), reqData)
 			}
 			s.logVerbose(r.Context(), sess,
-				fmt.Sprintf("%s opened a file", pName))
+				fmt.Sprintf("%s opened a file\tfile:%s", pName, msg.Path))
 
 		case protocol.TypeCloseFile:
 			// Acknowledged, no action needed
