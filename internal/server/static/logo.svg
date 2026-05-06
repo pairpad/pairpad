@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="296.51999"
+   height="108"
+   viewBox="0 0 296.51999 108"
+   version="1.1"
+   id="svg45"
+   sodipodi:docname="pairpad-logo-v2.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs45" />
+  <sodipodi:namedview
+     id="namedview45"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showguides="true">
+    <sodipodi:guide
+       position="-78.543827,53.14555"
+       orientation="0,-1"
+       id="guide45"
+       inkscape:locked="false" />
+    <sodipodi:guide
+       position="510.06591,93.95485"
+       orientation="1,0"
+       id="guide46"
+       inkscape:locked="false" />
+    <inkscape:page
+       x="0"
+       y="0"
+       width="296.51999"
+       height="108"
+       id="page2"
+       margin="0"
+       bleed="0" />
+  </sodipodi:namedview>
+  <title
+     id="title1">Pairpad logo concepts</title>
+  <style
+     id="style1">
+    body { background: #303446; }
+    .label  { font-family: 'SF Mono', 'Fira Mono', monospace; font-size: 11px; fill: #a5adce; letter-spacing: .08em; text-anchor: middle; }
+    .wm     { font-family: 'SF Mono', 'Fira Mono', monospace; font-size: 28px; font-weight: 500; fill: #c6d0f5; }
+    .wm-sm  { font-family: 'SF Mono', 'Fira Mono', monospace; font-size: 20px; font-weight: 500; fill: #c6d0f5; }
+    .dim    { fill: #414559; }
+  </style>
+  <rect
+     x="3.8585617e-07"
+     y="12"
+     width="18"
+     height="96"
+     rx="5"
+     fill="#babbf1"
+     opacity="0.3"
+     id="rect39" />
+  <rect
+     x="26"
+     y="0"
+     width="18"
+     height="96"
+     rx="5"
+     fill="#a6d189"
+     id="rect40" />
+  <text
+     x="64"
+     y="68"
+     style="font-weight:500;font-size:52px;font-family:'SF Mono', 'Fira Mono', monospace;fill:#c6d0f5"
+     id="text42">pairpad</text>
+  <text
+     x="54"
+     y="96"
+     style="font-size:12px;font-family:system-ui, sans-serif;letter-spacing:0.15em;fill:#737994"
+     id="text43">ANNOTATE · TOUR · COLLABORATE</text>
+</svg>

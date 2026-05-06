@@ -1,6 +1,6 @@
-# Pairpad
+# ![Pairpad](logo.png)
 
-Annotate your codebase. Walk your team through it.
+*Annotate your codebase. Walk your team through it.*
 
 Pairpad is a collaborative code annotation tool for developer onboarding. Leave persistent comments and guided tours anchored to your code, then walk new team members through the codebase in real time — or let them explore at their own pace.
 
@@ -110,8 +110,8 @@ Annotations are identified by project (SHA256 of git remote URL). Two developers
 The relay is a zero-knowledge message router — it never sees your source code or file paths.
 
 **Key derivation:** When a session is created, the daemon generates a random 8-byte seed and stores it locally in `~/.config/pairpad/sessions/`. Two keys are derived from this seed using HKDF-SHA256:
-- **Encryption key** (context: `pairpad-e2e`) — AES-256-GCM for file content
-- **HMAC key** (context: `pairpad-path`) — HMAC-SHA256 for file path tokens
+- **Encryption key** — AES-256-GCM for file content and annotation text
+- **HMAC key** — HMAC-SHA256 for file path tokens
 
 **What gets encrypted:**
 - All file content (reads, writes, changes) is AES-GCM encrypted by the daemon before sending

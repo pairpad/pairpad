@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pairpad</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="icon" type="image/png" href="favicon.png">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -60,12 +62,6 @@
       text-align: center;
       max-width: 400px;
       padding: 48px 32px;
-    }
-    #connect-box h1 {
-      font-size: 32px;
-      font-weight: 700;
-      margin-bottom: 8px;
-      color: var(--text-primary);
     }
     #connect-box .tagline {
       color: var(--text-secondary);
@@ -841,8 +837,7 @@
 
   <div id="connect-overlay">
     <div id="connect-box">
-      <h1>Pairpad</h1>
-      <p class="tagline">Collaborative code editing on your local files</p>
+      <img src="logo.svg" alt="Pairpad" style="height:64px;margin-bottom:24px;">
 
       <!-- Step 1: Session ID -->
       <div id="step-session">
@@ -876,7 +871,7 @@
   <div id="ide">
     <div id="topbar">
       <div class="session-info">
-        <strong>Pairpad</strong>
+        <img src="icon.svg" alt="Pairpad" style="height:20px;">
         <span class="session-id" id="session-id-display"></span>
       </div>
       <div class="participants" id="participant-list"></div>
