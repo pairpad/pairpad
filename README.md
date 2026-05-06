@@ -7,7 +7,7 @@ Pairpad is a collaborative code annotation tool for developer onboarding. Leave 
 ## Quick Start
 
 ```bash
-# Build (requires Go 1.21+ and Node.js 18+)
+# Build (requires Go 1.25+ and Node.js 18+)
 make build
 
 # Run everything locally — opens your browser
@@ -66,23 +66,62 @@ Three roles: **host** (daemon owner), **editor** (can edit and create tours), **
 ## How It Works
 
 ```
-┌──────────────┐        WebSocket         ┌──────────────┐
-│    Daemon    │◄───────────────────────► │    Relay     │
-│ (filesystem) │   outbound connection    │  (SQLite)    │
-└──────────────┘                          └──────┬───────┘
-                                                 │ WebSocket
-                                                 ▼
-                                          ┌──────────────┐
-                                          │   Browser    │
-                                          │ (CodeMirror) │
-                                          └──────────────┘
+┌───────────────┐                          ┌───────────────┐
+│               │   WebSocket (outbound)   │               │
+│    Daemon     │─────────────────────────►│    Relay      │
+│               │  encrypted file content  │               │
+│  • watches    │  HMAC path tokens        │  • routes     │
+│    filesystem │  project_connect         │    messages   │
+│  • encrypts   │◄─────────────────────────│  • stores     │
+│    with       │  request_file            │    annotations│
+│    AES-GCM    │  write_file              │    (SQLite)   │
+│  • HMAC       │  search_request          │  • manages    │
+│    file paths │  activity                │    sessions   │
+│               │                          │  • never sees │
+└───────────────┘                          │    plaintext  │
+                                           └──────┬────────┘
+                                                  │
+                                                  │ WebSocket
+                                                  │ encrypted content
+                                                  │ HMAC tokens
+                                                  │
+                                           ┌──────▼────────┐
+                                           │               │
+                                           │   Browser     │
+                                           │               │
+                                           │  • decrypts   │
+                                           │    with       │
+                                           │    Web Crypto │
+                                           │  • CodeMirror │
+                                           │    6 editor   │
+                                           │  • AST-based  │
+                                           │    anchoring  │
+                                           └───────────────┘
 ```
 
-- **Daemon** — watches your filesystem, serves files over WebSocket. Connects outbound only — no inbound ports, works behind firewalls.
-- **Relay** — routes messages between daemons and browsers. Stores annotations (comments, tours) in SQLite per project. Never stores source code.
-- **Browser** — CodeMirror 6 editor with syntax highlighting, Lezer-based AST anchoring, and all the collaboration UI.
+- **Daemon** — runs on the developer's machine, watches the filesystem (`fsnotify`), encrypts all file content and paths before sending. Connects outbound only — no inbound ports needed, works behind firewalls. Auto-reconnects on disconnect.
+- **Relay** — routes messages between daemons and browsers. Stores annotations (comments, tours) in SQLite per project. Never sees plaintext source code or real file paths — only ciphertext and HMAC tokens pass through.
+- **Browser** — CodeMirror 6 editor with syntax highlighting, Lezer-based AST anchoring, and all the collaboration UI. Decrypts file content client-side using Web Crypto API.
 
-Annotations are identified by project (git remote URL hash). Two developers on the same repo see the same annotations without sharing files.
+Annotations are identified by project (SHA256 of git remote URL). Two developers on the same repo share annotations without sharing files.
+
+### End-to-End Encryption
+
+The relay is a zero-knowledge message router — it never sees your source code or file paths.
+
+**Key derivation:** When a session is created, the daemon generates a random 8-byte seed and stores it locally in `~/.config/pairpad/sessions/`. Two keys are derived from this seed using HKDF-SHA256:
+- **Encryption key** (context: `pairpad-e2e`) — AES-256-GCM for file content
+- **HMAC key** (context: `pairpad-path`) — HMAC-SHA256 for file path tokens
+
+**What gets encrypted:**
+- All file content (reads, writes, changes) is AES-GCM encrypted by the daemon before sending
+- File paths are replaced with deterministic HMAC tokens — the relay routes by token without knowing the real path
+- Display paths and search results are also encrypted so the relay cannot read filenames or code snippets
+- Comment bodies, tour titles, tour descriptions, and all anchor text/context are encrypted by the browser before sending
+
+**Key distribution:** The encryption seed is appended to the session URL as a fragment (`#sessionId,seed`). URL fragments are never sent to the server — the browser reads the seed from the fragment and derives the same keys using Web Crypto API. Anyone with the URL can decrypt; anyone without it (including the relay operator) cannot.
+
+**What the relay _can_ see:** participant names, session metadata, and message timing/structure. It cannot see file content, file paths, comment text, tour content, or search results.
 
 ## CLI Reference
 
