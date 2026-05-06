@@ -1073,6 +1073,10 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 func clientIP(r *http.Request) string {
+	// Cloudflare Tunnel sets Cf-Connecting-Ip to the real client IP.
+	if cfIP := r.Header.Get("Cf-Connecting-Ip"); cfIP != "" {
+		return cfIP
+	}
 	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
 		if i := strings.IndexByte(fwd, ','); i > 0 {
 			return strings.TrimSpace(fwd[:i])
