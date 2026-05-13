@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// projectInfo holds the identity of the project being served.
-type projectInfo struct {
+// ProjectInfo holds the identity of the project being served.
+type ProjectInfo struct {
 	ID        string
 	Name      string
 	RemoteURL string
@@ -18,7 +18,7 @@ type projectInfo struct {
 // detectProject determines the project identity from the given directory.
 // Uses git remote origin URL if available, falls back to a hash of the
 // absolute path.
-func detectProject(dir string) projectInfo {
+func DetectProject(dir string) ProjectInfo {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		absDir = dir
@@ -29,7 +29,7 @@ func detectProject(dir string) projectInfo {
 	// Try to read git remote origin URL
 	remoteURL := gitRemoteURL(absDir)
 	if remoteURL != "" {
-		return projectInfo{
+		return ProjectInfo{
 			ID:        hashString(normalizeRemoteURL(remoteURL)),
 			Name:      name,
 			RemoteURL: remoteURL,
@@ -37,7 +37,7 @@ func detectProject(dir string) projectInfo {
 	}
 
 	// Fallback: hash of absolute path
-	return projectInfo{
+	return ProjectInfo{
 		ID:   hashString(absDir),
 		Name: name,
 	}

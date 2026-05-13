@@ -1,0 +1,184 @@
+[
+  {
+    "id": "architecture",
+    "title": "Architecture Overview",
+    "description": "A bird's-eye view of pairpad's three-tier design: daemon, relay, and browser.",
+    "steps": [
+      {
+        "file": "cmd/pairpad/main.go",
+        "line": 19,
+        "line_end": 45,
+        "title": "Entry Point",
+        "description": "The CLI dispatches between three modes: **local** runs relay + daemon in one process, **connect** links to a remote relay, and **relay** runs the server standalone. Each mode composes the same building blocks differently."
+      },
+      {
+        "file": "internal/daemon/daemon.go",
+        "line": 41,
+        "line_end": 52,
+        "title": "The Daemon",
+        "description": "The daemon watches a local directory, encrypts file content with AES-256-GCM, and streams changes to the relay over a WebSocket. It holds the encryption keys — nothing leaves this process in plaintext."
+      },
+      {
+        "file": "internal/server/server.go",
+        "line": 38,
+        "line_end": 45,
+        "title": "The Relay Server",
+        "description": "The relay routes messages between daemons and browsers. It persists encrypted annotations in SQLite but cannot decrypt them — it is a blind router by design. This is the core of pairpad's zero-knowledge architecture."
+      },
+      {
+        "file": "web/app.js",
+        "line": 212,
+        "line_end": 238,
+        "title": "The Browser Client",
+        "description": "The browser connects via WebSocket, derives encryption keys from a seed in the URL fragment (which is never sent to the server), and decrypts content client-side. The editor is built on CodeMirror 6."
+      }
+    ]
+  },
+  {
+    "id": "encryption",
+    "title": "End-to-End Encryption",
+    "description": "How pairpad protects your code so the relay never sees plaintext.",
+    "steps": [
+      {
+        "file": "internal/daemon/sessions.go",
+        "line": 86,
+        "line_end": 90,
+        "title": "Seed Generation",
+        "description": "An 8-byte random seed is generated once per session and stored locally. It's shared with browsers via the URL fragment — the part after `#` — which browsers never send to the server. This is the root of all encryption."
+      },
+      {
+        "file": "internal/daemon/daemon.go",
+        "line": 503,
+        "line_end": 510,
+        "title": "Key Derivation",
+        "description": "Two 256-bit keys are derived from the seed using HKDF-SHA256. The label `pairpad-e2e` produces the AES encryption key; `pairpad-path` produces the HMAC key for file path tokenization. Same seed, different keys, clean separation."
+      },
+      {
+        "file": "internal/daemon/daemon.go",
+        "line": 497,
+        "line_end": 501,
+        "title": "Path Tokenization",
+        "description": "File paths are replaced with HMAC-SHA256 tokens before leaving the daemon. The relay routes messages using these opaque tokens — it never learns the real file names. The tokens are deterministic, so the same path always maps to the same token."
+      },
+      {
+        "file": "internal/daemon/daemon.go",
+        "line": 512,
+        "line_end": 526,
+        "title": "Content Encryption",
+        "description": "All file content is encrypted with AES-256-GCM before transmission. Each message gets a fresh 12-byte random nonce prepended to the ciphertext. The relay stores and forwards this ciphertext without being able to decrypt it."
+      },
+      {
+        "file": "web/app.js",
+        "line": 76,
+        "line_end": 83,
+        "title": "Browser Decryption",
+        "description": "The browser derives the same AES key from the seed (received via URL fragment) and decrypts content on arrival. The Web Crypto API handles the AES-256-GCM operations. Encryption is symmetric — the same code path works for both encrypting outbound edits and decrypting inbound content."
+      }
+    ]
+  },
+  {
+    "id": "relay-vs-daemon",
+    "title": "Relay vs Daemon",
+    "description": "How the two backend components coordinate without sharing secrets.",
+    "steps": [
+      {
+        "file": "internal/daemon/daemon.go",
+        "line": 139,
+        "line_end": 206,
+        "title": "Daemon Connection",
+        "description": "The daemon opens a WebSocket to the relay at `/ws/daemon`, sends its project identity and host token, then begins streaming the encrypted file tree. On disconnect, it retries automatically every 2 seconds — sessions survive brief network interruptions."
+      },
+      {
+        "file": "internal/server/server.go",
+        "line": 95,
+        "line_end": 186,
+        "title": "Handling Daemon Connections",
+        "description": "The relay authenticates the daemon via its host token, creates or resumes the session, and stores it in both memory and SQLite. Sessions survive relay restarts (SQLite) and brief daemon disconnects (60-second grace period)."
+      },
+      {
+        "file": "internal/server/server.go",
+        "line": 307,
+        "line_end": 362,
+        "title": "Handling Browser Connections",
+        "description": "Browsers connect to a session by ID. The relay manages three roles — **host** (full control), **editor** (can edit files and create tours), and **commenter** (read-only with comments). Password authentication and rate limiting protect public sessions."
+      },
+      {
+        "file": "internal/daemon/watcher.go",
+        "line": 20,
+        "line_end": 50,
+        "title": "Filesystem Watching",
+        "description": "The daemon uses fsnotify to watch for file creates, changes, and deletes in real time. Events are filtered through gitignore-style patterns and converted into encrypted updates. New directories are automatically added to the watch list."
+      }
+    ]
+  },
+  {
+    "id": "annotations",
+    "title": "Annotations: Comments & Tours",
+    "description": "How comments and guided tours are stored, encrypted, and anchored to code.",
+    "steps": [
+      {
+        "file": "internal/protocol/messages.go",
+        "line": 275,
+        "line_end": 294,
+        "title": "Comment Data Model",
+        "description": "Comments carry an author, color, file/line anchor, body text, and resolution state. The `AnchorText` and `AnchorContext` fields enable re-anchoring when code changes. All text fields are encrypted by the browser before sending — the relay stores opaque ciphertext."
+      },
+      {
+        "file": "internal/protocol/messages.go",
+        "line": 322,
+        "line_end": 344,
+        "title": "Tour Data Model",
+        "description": "Tours are ordered sequences of steps, each anchored to a file and line range with a title and description. This is the data structure behind the feature you're using right now to read this walkthrough."
+      },
+      {
+        "file": "internal/storage/tours.go",
+        "line": 11,
+        "line_end": 25,
+        "title": "Database Persistence",
+        "description": "Annotations (comments and tours) are stored as JSON blobs in a polymorphic `annotations` table in SQLite. The relay marshals the encrypted struct to JSON and upserts it — it can save and retrieve tours without ever being able to read them."
+      },
+      {
+        "file": "internal/anchor/anchor.go",
+        "line": 27,
+        "line_end": 65,
+        "title": "Re-Anchoring",
+        "description": "When code changes, anchors may drift. `FindLine` uses a three-strategy approach: (1) check the original line, (2) exact-match the anchor text anywhere in the file, (3) fuzzy-match using surrounding context lines. If all fail, the annotation is marked orphaned."
+      }
+    ]
+  },
+  {
+    "id": "web-interface",
+    "title": "The Web Interface",
+    "description": "How the browser renders code, manages files, and enables real-time collaboration.",
+    "steps": [
+      {
+        "file": "web/app.js",
+        "line": 209,
+        "line_end": 238,
+        "title": "WebSocket Connection",
+        "description": "The browser opens a WebSocket to the relay, authenticates with a name and optional password or host token, then begins receiving the file tree and stored annotations. The encryption seed is extracted from the URL fragment and used to derive keys before the connection opens."
+      },
+      {
+        "file": "web/editor.js",
+        "line": 295,
+        "line_end": 307,
+        "title": "Code Editor",
+        "description": "The editor is built on CodeMirror 6 with language-aware syntax highlighting (Go, JavaScript, Python, Rust, and more), line gutters for annotation markers, and collaborative cursor indicators. Each file's EditorState — including undo history and scroll position — is preserved across tab switches."
+      },
+      {
+        "file": "web/app.js",
+        "line": 85,
+        "line_end": 115,
+        "title": "Field Encryption",
+        "description": "Comment and tour text is encrypted in the browser before sending using AES-256-GCM via the Web Crypto API. Each field gets a fresh 12-byte random nonce. The relay stores these encrypted strings without being able to read them."
+      },
+      {
+        "file": "web/app.js",
+        "line": 562,
+        "line_end": 578,
+        "title": "Tour Playback",
+        "description": "When a tour list arrives from the relay, the browser decrypts each tour's title, description, step titles, and anchor data. Clicking a step opens the referenced file, scrolls to the anchored line, and displays the step description in a panel — exactly what you're seeing right now."
+      }
+    ]
+  }
+]

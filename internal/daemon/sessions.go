@@ -38,7 +38,7 @@ func sessionsDir() string {
 }
 
 // loadSession loads the session record for a project, or generates a new one.
-func loadSession(projectID string, forceNew bool) (sessionID, hostToken, encryptionSeed string) {
+func LoadSession(projectID string, forceNew bool) (sessionID, hostToken, encryptionSeed string) {
 	dir := sessionsDir()
 	if dir == "" {
 		return generateSessionID(), generateSessionID(), generateEncryptionSeed()

@@ -41,7 +41,7 @@ type Config struct {
 type Daemon struct {
 	cfg            Config
 	ignore         *ignoreMatcher
-	project        projectInfo
+	project        ProjectInfo
 	sessionID      string
 	hostToken      string
 	encryptionSeed string
@@ -58,24 +58,24 @@ func New(cfg Config) (*Daemon, error) {
 		return nil, fmt.Errorf("project directory does not exist: %s", cfg.ProjectDir)
 	}
 
-	project := detectProject(cfg.ProjectDir)
+	project := DetectProject(cfg.ProjectDir)
 	var sessionID, hostToken, encryptionSeed string
 	if cfg.SessionID != "" {
 		sessionID = cfg.SessionID
-		_, hostToken, encryptionSeed = loadSession(project.ID, false)
+		_, hostToken, encryptionSeed = LoadSession(project.ID, false)
 	} else {
-		sessionID, hostToken, encryptionSeed = loadSession(project.ID, cfg.NewSession)
+		sessionID, hostToken, encryptionSeed = LoadSession(project.ID, cfg.NewSession)
 	}
 
 	seedBytes, err := base64.RawURLEncoding.DecodeString(encryptionSeed)
 	if err != nil {
 		return nil, fmt.Errorf("invalid encryption seed: %w", err)
 	}
-	encKey, err := deriveKey(seedBytes)
+	encKey, err := DeriveKey(seedBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive encryption key: %w", err)
 	}
-	hmacKey, err := deriveHMACKey(seedBytes)
+	hmacKey, err := DeriveHMACKey(seedBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive HMAC key: %w", err)
 	}
@@ -212,9 +212,9 @@ func (d *Daemon) sendFileTree(ctx context.Context, conn *websocket.Conn) error {
 	}
 	for i := range files {
 		realPath := files[i].Path
-		token := pathToken(d.hmacKey, realPath)
+		token := PathToken(d.hmacKey, realPath)
 		d.tokenToPath[token] = realPath
-		encPath, err := encryptContent(d.encKey, []byte(realPath))
+		encPath, err := EncryptContent(d.encKey, []byte(realPath))
 		if err != nil {
 			return err
 		}
@@ -263,7 +263,7 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 			})
 		}
 		h := sha256.Sum256(content)
-		encrypted, err := encryptContent(d.encKey, content)
+		encrypted, err := EncryptContent(d.encKey, content)
 		if err != nil {
 			return err
 		}
@@ -282,7 +282,7 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 		if !ok {
 			return fmt.Errorf("unknown file token for write")
 		}
-		plaintext, err := decryptContent(d.encKey, msg.Content)
+		plaintext, err := DecryptContent(d.encKey, msg.Content)
 		if err != nil {
 			return err
 		}
@@ -364,7 +364,7 @@ func (d *Daemon) handleServerMessage(ctx context.Context, conn *websocket.Conn, 
 }
 
 func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event watcherEvent) error {
-	token := pathToken(d.hmacKey, event.RelPath)
+	token := PathToken(d.hmacKey, event.RelPath)
 
 	switch event.Type {
 	case protocol.TypeFileCreated:
@@ -373,12 +373,12 @@ func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event 
 			return nil
 		}
 		h := sha256.Sum256(content)
-		encrypted, err := encryptContent(d.encKey, content)
+		encrypted, err := EncryptContent(d.encKey, content)
 		if err != nil {
 			return err
 		}
 		d.tokenToPath[token] = event.RelPath
-		encPath, err := encryptContent(d.encKey, []byte(event.RelPath))
+		encPath, err := EncryptContent(d.encKey, []byte(event.RelPath))
 		if err != nil {
 			return err
 		}
@@ -395,7 +395,7 @@ func (d *Daemon) handleFSEvent(ctx context.Context, conn *websocket.Conn, event 
 			return nil
 		}
 		h := sha256.Sum256(content)
-		encrypted, err := encryptContent(d.encKey, content)
+		encrypted, err := EncryptContent(d.encKey, content)
 		if err != nil {
 			return err
 		}
@@ -450,12 +450,12 @@ func (d *Daemon) searchFiles(query string) protocol.SearchResults {
 			return nil
 		}
 
-		token := pathToken(d.hmacKey, rel)
+		token := PathToken(d.hmacKey, rel)
 		lines := strings.Split(string(data), "\n")
 		for i, line := range lines {
 			if strings.Contains(strings.ToLower(line), lowerQuery) {
-				encPath, _ := encryptContent(d.encKey, []byte(rel))
-				encLine, _ := encryptContent(d.encKey, []byte(strings.TrimSpace(line)))
+				encPath, _ := EncryptContent(d.encKey, []byte(rel))
+				encLine, _ := EncryptContent(d.encKey, []byte(strings.TrimSpace(line)))
 				matches = append(matches, protocol.SearchMatch{
 					File:        token,
 					DisplayPath: base64.RawURLEncoding.EncodeToString(encPath),
@@ -485,7 +485,7 @@ func (d *Daemon) send(ctx context.Context, conn *websocket.Conn, msgType protoco
 	return conn.Write(ctx, websocket.MessageText, data)
 }
 
-func deriveHMACKey(seed []byte) ([]byte, error) {
+func DeriveHMACKey(seed []byte) ([]byte, error) {
 	r := hkdf.New(sha256.New, seed, nil, []byte("pairpad-path"))
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(r, key); err != nil {
@@ -494,13 +494,13 @@ func deriveHMACKey(seed []byte) ([]byte, error) {
 	return key, nil
 }
 
-func pathToken(hmacKey []byte, path string) string {
+func PathToken(hmacKey []byte, path string) string {
 	mac := hmac.New(sha256.New, hmacKey)
 	mac.Write([]byte(path))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func deriveKey(seed []byte) ([]byte, error) {
+func DeriveKey(seed []byte) ([]byte, error) {
 	r := hkdf.New(sha256.New, seed, nil, []byte("pairpad-e2e"))
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(r, key); err != nil {
@@ -509,7 +509,7 @@ func deriveKey(seed []byte) ([]byte, error) {
 	return key, nil
 }
 
-func encryptContent(key, plaintext []byte) ([]byte, error) {
+func EncryptContent(key, plaintext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -525,7 +525,7 @@ func encryptContent(key, plaintext []byte) ([]byte, error) {
 	return gcm.Seal(nonce, nonce, plaintext, nil), nil
 }
 
-func decryptContent(key, ciphertext []byte) ([]byte, error) {
+func DecryptContent(key, ciphertext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err

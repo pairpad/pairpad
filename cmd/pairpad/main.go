@@ -10,6 +10,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 	"github.com/pairpad/pairpad/internal/daemon"
+	"github.com/pairpad/pairpad/internal/importer"
 	"github.com/pairpad/pairpad/internal/server"
 )
 
@@ -31,6 +32,8 @@ func main() {
 		cmdConnect()
 	case "relay":
 		cmdRelay()
+	case "import":
+		cmdImport()
 	case "login":
 		cmdLogin()
 	case "version", "--version", "-v":
@@ -53,6 +56,7 @@ Commands:
   connect     Connect this project to pairpad.dev (or a self-hosted relay)
   local       Run everything locally — no server needed
   relay       Run a self-hosted relay server
+  import      Import tours from a JSON file into a session
   version     Print version information
   help        Show this help
 
@@ -220,6 +224,43 @@ Flags:
 	if err := srv.Run(); err != nil {
 		fatal("%v", err)
 	}
+}
+
+func cmdImport() {
+	fs := flag.NewFlagSet("import", flag.ExitOnError)
+	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "wss://pairpad.dev"), "Relay server URL")
+	dir := fs.StringP("dir", "d", ".", "Project directory")
+	sessionID := fs.String("session", "", "Target a specific session ID (default: use saved session)")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, `Import tours from a JSON file into an active session.
+Requires a running daemon for the same project.
+
+Usage: pairpad import [flags] <file>
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	fs.Parse(os.Args[1:])
+
+	args := fs.Args()
+	if len(args) == 0 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	cfg := importer.Config{
+		ProjectDir: *dir,
+		ServerURL:  *serverURL,
+		SessionID:  *sessionID,
+		FilePath:   args[0],
+	}
+
+	fmt.Printf("pairpad: importing tours from %s\n", cfg.FilePath)
+	if err := importer.Import(cfg); err != nil {
+		fatal("%v", err)
+	}
+	fmt.Printf("pairpad: import complete\n")
 }
 
 func cmdLogin() {
