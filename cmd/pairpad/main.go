@@ -53,7 +53,7 @@ func printUsage() {
 Usage: pairpad <command> [flags]
 
 Commands:
-  connect     Connect this project to pairpad.dev (or a self-hosted relay)
+  connect     Connect this project to app.pairpad.dev (or a self-hosted relay)
   local       Run everything locally — no server needed
   relay       Run a self-hosted relay server
   import      Import tours from a JSON file into a session
@@ -61,7 +61,7 @@ Commands:
   help        Show this help
 
 Quick start:
-  pairpad connect              Share the current directory via pairpad.dev
+  pairpad connect              Share the current directory via app.pairpad.dev
   pairpad connect --dir ~/src  Share a specific directory
   pairpad local                Try it locally first (opens browser)
 
@@ -146,7 +146,7 @@ Flags:
 
 func cmdConnect() {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
-	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "wss://pairpad.dev"), "Relay server URL")
+	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "wss://app.pairpad.dev"), "Relay server URL")
 	dir := fs.StringP("dir", "d", ".", "Project directory")
 	newSession := fs.Bool("new", false, "Start a new session (default: continue previous)")
 	sessionID := fs.String("session", "", "Resume a specific session ID")
@@ -228,7 +228,7 @@ Flags:
 
 func cmdImport() {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
-	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "wss://pairpad.dev"), "Relay server URL")
+	serverURL := fs.StringP("server", "s", envOrDefault("PAIRPAD_SERVER", "wss://app.pairpad.dev"), "Relay server URL")
 	dir := fs.StringP("dir", "d", ".", "Project directory")
 	sessionID := fs.String("session", "", "Target a specific session ID (default: use saved session)")
 	fs.Usage = func() {

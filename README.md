@@ -137,7 +137,7 @@ Commands:
 Common flags:
   -a, --addr        Listen address (default :8080)
   -d, --dir         Project directory (default .)
-  -s, --server      Relay URL for connect (default wss://pairpad.dev)
+  -s, --server      Relay URL for connect (default wss://app.pairpad.dev)
   -p, --password    Require password to join session
       --new         Start a new session (default: continue previous)
       --session     Resume a specific session ID
